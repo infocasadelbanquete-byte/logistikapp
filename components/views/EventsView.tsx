@@ -101,26 +101,26 @@ const EventsView: React.FC = () => {
         subtotal: order.items.reduce((acc, i) => acc + (i.priceAtBooking * i.quantity), 0) * (order.rentalDays || 1),
     };
 
-    win.document.write(`
+    const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="utf-8">
           <title>${order.status === EventStatus.QUOTE ? 'Proforma' : 'Pedido'} #${order.orderNumber}</title>
           <style>
-            body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 20px; color: #333; margin: 0; }
+            body { font-family: sans-serif; padding: 40px; color: #333; margin: 0; }
             .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4c0519; padding-bottom: 15px; }
             .logo { height: 60px; }
             .title { text-align: right; }
             .title h1 { margin: 0; color: #4c0519; font-size: 20px; text-transform: uppercase; }
-            .info-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; font-size: 12px; }
+            .info-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; font-size: 12px; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
             th { background: #f8f8f8; border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 10px; text-transform: uppercase; }
+            td { border: 1px solid #ddd; padding: 10px; }
             .totals { margin-top: 20px; width: 300px; margin-left: auto; }
             .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
             .grand-total { border-top: 2px solid #4c0519; margin-top: 10px; padding-top: 10px; font-weight: 900; font-size: 16px; color: #4c0519; }
-            .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
-            @media print { .no-print { display: none; } }
+            .footer { margin-top: 60px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
           </style>
         </head>
         <body>
@@ -134,14 +134,14 @@ const EventsView: React.FC = () => {
           <div class="info-section">
             <div>
               <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #4c0519;">Cliente</div>
-              <div>${order.clientName}</div>
+              <div style="font-weight: bold; font-size: 14px;">${order.clientName}</div>
               <div>Dirección: ${order.deliveryAddress || 'N/A'}</div>
             </div>
             <div style="text-align: right;">
-              <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #4c0519;">Detalles</div>
-              <div>Fecha de Evento: ${order.executionDate}</div>
-              <div>Días de Alquiler: ${order.rentalDays || 1}</div>
-              ${order.warehouseExitNumber ? `<div>EB N°: ${order.warehouseExitNumber}</div>` : ''}
+              <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #4c0519;">Detalles de Logística</div>
+              <div>Fecha de Evento: <strong>${order.executionDate}</strong></div>
+              <div>Días de Alquiler: <strong>${order.rentalDays || 1}</strong></div>
+              ${order.warehouseExitNumber ? `<div>EB N°: <strong>${order.warehouseExitNumber}</strong></div>` : ''}
             </div>
           </div>
           <table>
@@ -163,20 +163,23 @@ const EventsView: React.FC = () => {
           </div>
           <div class="footer">
             Generado por Logistik Pro • ${settings?.name || COMPANY_NAME}<br/>
-            Este documento no constituye una factura legal.
+            Este documento representa un compromiso de reserva / cotización.
           </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-                window.onafterprint = function() { window.close(); };
-              }, 500);
-            };
-          </script>
         </body>
       </html>
-    `);
+    `;
+
+    win.document.open();
+    win.document.write(htmlContent);
     win.document.close();
+    
+    // Forzar foco y disparar impresión después de un breve delay para renderizado
+    setTimeout(() => {
+      win.focus();
+      win.print();
+      // Opcional: cerrar la ventana después de imprimir si no es safari/móvil
+      win.onafterprint = () => win.close();
+    }, 800);
   };
 
   const handleSave = async (asQuote: boolean = false) => {
@@ -196,26 +199,34 @@ const EventsView: React.FC = () => {
       items: selectedItems.map(i => ({ itemId: i.id, quantity: i.quantity, priceAtBooking: parseFloat(i.price) }))
     };
 
-    const id = await storageService.saveEvent(order);
-    if (await uiService.confirm("Éxito", "¿Desea imprimir el comprobante ahora?")) {
-        handlePrintOrder({ ...order, id });
+    try {
+      const id = await storageService.saveEvent(order);
+      if (await uiService.confirm("Operación Exitosa", "¿Desea generar el documento PDF/Impresión ahora?")) {
+          handlePrintOrder({ ...order, id });
+      }
+      resetForm();
+    } catch (e) {
+      uiService.alert("Error", "No se pudo guardar la información en la base de datos.");
     }
-    resetForm();
   };
 
   const handleSaveExpressClient = async () => {
     if (!expressClientData.name) return uiService.alert("Faltan Datos", "El nombre es obligatorio.");
     const newClient: Client = { id: '', name: expressClientData.name, documentId: expressClientData.documentId, email: '', phone: '', mobilePhone: expressClientData.mobilePhone, address: '' };
-    await storageService.saveClient(newClient);
-    setIsExpressModalOpen(false);
-    setExpressClientData({ name: '', documentId: '', mobilePhone: '' });
-    uiService.alert("Éxito", "Cliente registrado.");
+    try {
+      await storageService.saveClient(newClient);
+      setIsExpressModalOpen(false);
+      setExpressClientData({ name: '', documentId: '', mobilePhone: '' });
+      uiService.alert("Éxito", "Cliente registrado correctamente.");
+    } catch (e) {
+      uiService.alert("Error", "Error al registrar el cliente express.");
+    }
   };
 
   const handleSendToDispatch = async (o: EventOrder) => {
-      if (await uiService.confirm("Enviar a Despacho", `¿Autorizar el despacho del pedido #${o.orderNumber}?`)) {
+      if (await uiService.confirm("Autorizar Despacho", `¿Desea enviar el pedido #${o.orderNumber} al área de despachos?`)) {
           await storageService.saveEvent({ ...o, status: EventStatus.DISPATCHED });
-          uiService.alert("Enviado", "Pedido disponible en Despachos.");
+          uiService.alert("Enviado", "Pedido listo en el módulo de Despachos.");
       }
   };
 
@@ -264,7 +275,7 @@ const EventsView: React.FC = () => {
           <div className="bg-white p-4 rounded-2xl shadow-soft border border-zinc-100">
             <input type="text" placeholder="Filtrar por cliente..." className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 pb-10">
             {filteredData.map(o => (
               <div key={o.id} className={`bg-white p-3 rounded-xl shadow-soft border-t-2 flex flex-col hover:shadow-premium transition-all ${o.status === EventStatus.QUOTE ? 'border-violet-500' : 'border-brand-500'}`}>
                 <div className="flex justify-between mb-1">
