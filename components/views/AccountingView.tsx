@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
-import { PurchaseTransaction, Withholding, PayrollEntry, Client, EventOrder, UserRole } from '../../types';
+import { PurchaseTransaction, Withholding, PayrollEntry, Client, EventOrder, UserRole, EventStatus } from '../../types';
 
 const AccountingView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'PURCHASES' | 'WITHHOLDINGS' | 'PAYROLL' | 'REPORTS'>('PURCHASES');
+  const [activeTab, setActiveTab] = useState<'PURCHASES' | 'WITHHOLDINGS' | 'PAYROLL' | 'INVOICED_CONTROL' | 'REPORTS'>('PURCHASES');
   const [clients, setClients] = useState<Client[]>([]);
   const [orders, setOrders] = useState<EventOrder[]>([]);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.STAFF);
@@ -32,9 +32,9 @@ const AccountingView: React.FC = () => {
           <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest mt-1">Gestión financiera y contabilidad interna</p>
         </div>
         <div className="flex bg-zinc-100 p-1.5 rounded-2xl shadow-inner gap-1 overflow-x-auto no-scrollbar">
-          {['PURCHASES', 'WITHHOLDINGS', 'PAYROLL', 'REPORTS'].map(tab => (
+          {['PURCHASES', 'WITHHOLDINGS', 'PAYROLL', 'INVOICED_CONTROL', 'REPORTS'].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all whitespace-nowrap ${activeTab === tab ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>
-              {tab === 'PURCHASES' ? '🛒 Compras' : tab === 'WITHHOLDINGS' ? '🧾 Retenciones' : tab === 'PAYROLL' ? '👥 Nómina' : '📈 Reportes'}
+              {tab === 'PURCHASES' ? '🛒 Compras' : tab === 'WITHHOLDINGS' ? '🧾 Retenciones' : tab === 'PAYROLL' ? '👥 Nómina' : tab === 'INVOICED_CONTROL' ? '📄 Facturación' : '📈 Reportes'}
             </button>
           ))}
         </div>
@@ -44,10 +44,87 @@ const AccountingView: React.FC = () => {
         {activeTab === 'PURCHASES' && <PurchasesModule purchases={purchases} />}
         {activeTab === 'WITHHOLDINGS' && <WithholdingsModule withholdings={withholdings} clients={clients} orders={orders} />}
         {activeTab === 'PAYROLL' && <PayrollModule payroll={payroll} />}
+        {activeTab === 'INVOICED_CONTROL' && <InvoicedControlModule orders={orders} />}
         {activeTab === 'REPORTS' && <AccountingReports purchases={purchases} withholdings={withholdings} payroll={payroll} orders={orders} />}
       </div>
     </div>
   );
+};
+
+const InvoicedControlModule = ({ orders }: { orders: EventOrder[] }) => {
+    const invoiceableOrders = orders.filter(o => o.hasInvoice && o.status !== EventStatus.QUOTE && o.status !== EventStatus.CANCELLED);
+    
+    const toggleInvoicedStatus = async (order: EventOrder) => {
+        const updated = { ...order, invoiceGenerated: !order.invoiceGenerated };
+        await storageService.saveEvent(updated);
+    };
+
+    const updateInvoiceNumber = async (order: EventOrder, val: string) => {
+        const updated = { ...order, invoiceNumber: val };
+        await storageService.saveEvent(updated);
+    };
+
+    return (
+        <div className="bg-white rounded-[2.5rem] shadow-premium border border-zinc-100 overflow-hidden flex flex-col">
+            <div className="p-6 border-b bg-zinc-50/50">
+                <h3 className="text-xs font-black text-brand-900 uppercase tracking-widest">Control de Facturas Pendientes</h3>
+                <p className="text-[8px] text-zinc-400 uppercase mt-1">Pedidos que requieren emisión de documento legal</p>
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                    <thead className="bg-zinc-50 border-b">
+                        <tr className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">
+                            <th className="px-6 py-4 w-10 text-center">Hecho</th>
+                            <th className="px-6 py-4">Orden</th>
+                            <th className="px-6 py-4">Cliente</th>
+                            <th className="px-6 py-4">Nº Factura Realizada</th>
+                            <th className="px-6 py-4 text-right">Total $</th>
+                            <th className="px-6 py-4 text-center">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-50">
+                        {invoiceableOrders.map(o => (
+                            <tr key={o.id} className={`text-[10px] font-bold text-zinc-700 hover:bg-zinc-50 transition-colors ${o.invoiceGenerated ? 'bg-emerald-50/20' : ''}`}>
+                                <td className="px-6 py-4 text-center">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={!!o.invoiceGenerated} 
+                                        onChange={() => toggleInvoicedStatus(o)}
+                                        className="w-4 h-4 rounded border-zinc-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                                    />
+                                </td>
+                                <td className="px-6 py-4 font-mono">#ORD-{o.orderNumber}</td>
+                                <td className="px-6 py-4 uppercase truncate max-w-[150px]">{o.clientName}</td>
+                                <td className="px-6 py-4">
+                                    <input 
+                                        type="number" 
+                                        placeholder="0000000"
+                                        className="w-32 bg-zinc-50 border-none rounded px-2 py-1 text-[10px] font-black outline-none focus:ring-2 focus:ring-brand-200"
+                                        value={o.invoiceNumber || ''}
+                                        onBlur={(e) => updateInvoiceNumber(o, e.target.value)}
+                                        onChange={(e) => updateInvoiceNumber(o, e.target.value)}
+                                    />
+                                </td>
+                                <td className="px-6 py-4 text-right font-black">$ {o.total.toFixed(2)}</td>
+                                <td className="px-6 py-4 text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${o.invoiceGenerated ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {o.invoiceGenerated ? 'FACTURADO' : 'PENDIENTE'}
+                                    </span>
+                                </td>
+                            </tr>
+                        ))}
+                        {invoiceableOrders.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="py-20 text-center text-zinc-300 font-black uppercase text-[10px] tracking-widest">
+                                    No hay pedidos que requieran factura
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
 };
 
 const PurchasesModule = ({ purchases }: { purchases: PurchaseTransaction[] }) => {

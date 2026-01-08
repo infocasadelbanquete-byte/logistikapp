@@ -103,6 +103,7 @@ const PaymentsView: React.FC = () => {
   const handlePrintReceiptData = async (event: EventOrder, transaction: PaymentTransaction, newBalance: number) => {
       const settings = await storageService.getSettings();
       const win = window.open('', '_blank'); if (!win) return;
+      const ebTag = event.warehouseExitNumber ? `<div style="font-weight: 800; margin-top: 5px; color: #be123c;">EB N°: ${event.warehouseExitNumber}</div>` : '';
       const receiptContent = (typeLabel: string) => `
         <div style="border: 2px solid #4c0519; padding: 20px; margin-bottom: 20px; position: relative; font-family: sans-serif; border-radius: 10px;">
           <div style="text-align: right; font-size: 8px; font-weight: bold; position: absolute; top: 10px; right: 10px; color: #4c0519;">${typeLabel}</div>
@@ -111,6 +112,7 @@ const PaymentsView: React.FC = () => {
             <div style="font-weight: 900; font-size: 18px; color: #4c0519; text-transform: uppercase;">${settings?.name || COMPANY_NAME}</div>
             <div style="font-size: 12px; font-weight: bold; margin-top: 5px; color: #666; letter-spacing: 2px;">RECIBO DE CAJA</div>
             <div style="font-weight: 800; font-size: 14px; color: #000; margin-top: 5px;">FOLIO: ${transaction.receiptCode || transaction.id.slice(-8)}</div>
+            ${ebTag}
           </div>
           <div style="border-bottom: 2px dashed #4c0519; margin: 15px 0;"></div>
           <div style="font-size: 10px; line-height: 1.6;">

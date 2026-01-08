@@ -90,6 +90,7 @@ export interface PaymentTransaction {
 export interface EventOrder {
   id: string;
   orderNumber: number;
+  warehouseExitNumber?: number; // Campo numérico EB N°
   clientId: string;
   clientName: string;
   orderDate: string;

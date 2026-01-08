@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Client, UserRole, EventOrder, EventStatus } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -50,13 +49,12 @@ const ClientView: React.FC = () => {
 
     const rows = clientEvents.map(e => {
       const balance = e.total - e.paidAmount;
-      // Fixed: Replaced EventStatus.COMPLETED with EventStatus.RETURNED
       const statusLabel = e.status === EventStatus.RETURNED ? 'COMPLETADO' : e.status === EventStatus.CANCELLED ? 'ANULADO' : 'ACTIVO';
       const paymentsText = e.transactions?.map(t => `${t.method}: $${t.amount.toFixed(2)}`).join(' | ') || 'SIN PAGOS';
 
       return `
         <tr>
-          <td style="border: 1px solid #000; padding: 6px; font-weight: bold; font-family: monospace;">#ORD-${String(e.orderNumber).padStart(4, '0')}</td>
+          <td style="border: 1px solid #000; padding: 6px; font-weight: bold; font-family: monospace;">#ORD-${String(e.orderNumber).padStart(4, '0')}${e.warehouseExitNumber ? `<br/><span style="color:#be123c; font-size:7px;">EB: ${e.warehouseExitNumber}</span>` : ''}</td>
           <td style="border: 1px solid #000; padding: 6px;">${e.executionDate}</td>
           <td style="border: 1px solid #000; padding: 6px; font-weight: 800; font-size: 8px;">${statusLabel}</td>
           <td style="border: 1px solid #000; padding: 6px; text-align: right;">$ ${e.total.toFixed(2)}</td>
@@ -102,7 +100,7 @@ const ClientView: React.FC = () => {
         <table>
           <thead>
             <tr>
-              <th width="10%">Orden</th>
+              <th width="10%">Orden / EB</th>
               <th width="10%">Fecha</th>
               <th width="10%">Estado</th>
               <th width="10%">Venta Total</th>
@@ -323,7 +321,6 @@ const ClientView: React.FC = () => {
                                           <div className="flex-1">
                                               <div className="flex items-center gap-2 mb-2">
                                                   <span className="font-mono font-black text-[10px] bg-white px-2 py-0.5 rounded border">#ORD-{e.orderNumber}</span>
-                                                  {/* Fixed: Replaced EventStatus.COMPLETED with EventStatus.RETURNED */}
                                                   <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase ${e.status === EventStatus.RETURNED ? 'bg-emerald-100 text-emerald-700' : e.status === EventStatus.CANCELLED ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
                                                       {e.status === EventStatus.RETURNED ? 'COMPLETADO' : e.status === EventStatus.CANCELLED ? 'ANULADO' : 'ACTIVO'}
                                                   </span>
@@ -370,7 +367,6 @@ const ClientView: React.FC = () => {
                 </div>
               </div>
               
-              {/* Doc Type Selector */}
               <div className="bg-gray-50 p-3 rounded-md border border-gray-200">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Identificación (Opcional)</label>
                 <div className="flex gap-4">

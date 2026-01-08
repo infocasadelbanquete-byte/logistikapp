@@ -10,6 +10,7 @@ const QuotesView: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showArchive, setShowArchive] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,6 +24,7 @@ const QuotesView: React.FC = () => {
     rentalDays: 1,
     hasInvoice: false,
     deliveryCost: 0,
+    deliveryAddress: '',
     discountValue: 0,
     discountType: 'VALUE'
   });
@@ -32,16 +34,12 @@ const QuotesView: React.FC = () => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
         
-        // Lógica de eliminación automática (3 días después del evento)
         all.forEach(q => {
           if (q.status === EventStatus.QUOTE && q.executionDate) {
             const execDate = new Date(q.executionDate + 'T00:00:00');
             const expiryDate = new Date(execDate);
             expiryDate.setDate(expiryDate.getDate() + 3);
-            
-            if (now > expiryDate) {
-              storageService.deleteEvent(q.id);
-            }
+            if (now > expiryDate) storageService.deleteEvent(q.id);
           }
         });
 
@@ -52,7 +50,6 @@ const QuotesView: React.FC = () => {
     const session = storageService.getCurrentSession();
     if (session) setUserRole(session.role);
 
-    // Cargar borrador
     const savedDraft = localStorage.getItem(QUOTE_DRAFT_KEY);
     if (savedDraft) {
       const { data, items } = JSON.parse(savedDraft);
@@ -64,7 +61,6 @@ const QuotesView: React.FC = () => {
     return () => unsub();
   }, []);
 
-  // Persistir borrador automáticamente
   useEffect(() => {
     if (viewMode === 'create' && !editingId && (quoteData.clientId || selectedItems.length > 0)) {
       localStorage.setItem(QUOTE_DRAFT_KEY, JSON.stringify({ data: quoteData, items: selectedItems }));
@@ -91,9 +87,7 @@ const QuotesView: React.FC = () => {
   const calculateDiscountValue = () => {
     const base = calculateDiscountableBase();
     const dVal = parseFloat(String(quoteData.discountValue)) || 0;
-    if (quoteData.discountType === 'PERCENT') {
-      return base * (dVal / 100);
-    }
+    if (quoteData.discountType === 'PERCENT') return base * (dVal / 100);
     return dVal;
   };
 
@@ -108,23 +102,27 @@ const QuotesView: React.FC = () => {
 
   const handleConfirmOrder = async (q: EventOrder) => {
       if (await uiService.confirm("Confirmar", `¿Convertir PRO-${q.orderNumber} en Pedido?`)) {
-          await storageService.saveEvent({ ...q, status: EventStatus.CONFIRMED });
-          uiService.alert("Listo", "Proforma confirmada.");
+          const ebNumStr = await uiService.prompt("Egreso de Bodega", "Ingrese el número de Egreso de Bodega (EB N°):", String(q.warehouseExitNumber || ''));
+          const ebNum = parseInt(ebNumStr || '');
+          
+          await storageService.saveEvent({ 
+            ...q, 
+            status: EventStatus.CONFIRMED,
+            warehouseExitNumber: isNaN(ebNum) ? q.warehouseExitNumber : ebNum
+          });
+          uiService.alert("Listo", "Proforma confirmada y convertida en pedido.");
       }
   };
 
   const handleSave = async () => {
       if (!quoteData.clientId || selectedItems.length === 0) return uiService.alert("Error", "Faltan datos");
+      if (quoteData.deliveryCost > 0 && !quoteData.deliveryAddress) return uiService.alert("Falta Dirección", "Debe indicar dónde se entregará el mobiliario.");
       
       if (userRole === UserRole.STAFF) {
         const base = calculateDiscountableBase();
         const dVal = parseFloat(String(quoteData.discountValue)) || 0;
-        if (quoteData.discountType === 'PERCENT' && dVal > 10) {
-          return uiService.alert("Acceso Restringido", "Como STAFF, el descuento máximo permitido es 10%.");
-        }
-        if (quoteData.discountType === 'VALUE' && dVal > (base * 0.10)) {
-          return uiService.alert("Acceso Restringido", `Como STAFF, el descuento máximo permitido es $${(base * 0.10).toFixed(2)} (10% del subtotal descontable).`);
-        }
+        if (quoteData.discountType === 'PERCENT' && dVal > 10) return uiService.alert("Acceso Restringido", "Como STAFF, el descuento máximo permitido es 10%.");
+        if (quoteData.discountType === 'VALUE' && dVal > (base * 0.10)) return uiService.alert("Acceso Restringido", `Descuento excesivo para su rol.`);
       }
 
       setLoading(true);
@@ -147,11 +145,12 @@ const QuotesView: React.FC = () => {
           hasInvoice: quoteData.hasInvoice,
           discountValue: parseFloat(String(quoteData.discountValue)) || 0,
           discountType: quoteData.discountType,
-          deliveryCost: parseFloat(String(quoteData.deliveryCost)) || 0
+          deliveryCost: parseFloat(String(quoteData.deliveryCost)) || 0,
+          deliveryAddress: quoteData.deliveryAddress
       };
 
       await storageService.saveEvent(quote);
-      localStorage.removeItem(QUOTE_DRAFT_KEY); // Limpiar tras guardar
+      localStorage.removeItem(QUOTE_DRAFT_KEY);
       setLoading(false);
       uiService.alert("Éxito", "Proforma guardada.");
       resetForm();
@@ -169,6 +168,7 @@ const QuotesView: React.FC = () => {
         rentalDays: 1,
         hasInvoice: false,
         deliveryCost: 0,
+        deliveryAddress: '',
         discountValue: 0,
         discountType: 'VALUE'
       });
@@ -186,7 +186,15 @@ const QuotesView: React.FC = () => {
     setViewMode('create');
   };
 
-  const filtered = quotes.filter(q => q.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(q.orderNumber).includes(searchQuery));
+  const filteredQuotes = quotes.filter(q => {
+    const matchesSearch = q.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(q.orderNumber).includes(searchQuery);
+    const orderDate = new Date(q.executionDate);
+    const now = new Date();
+    const isCurrentMonth = orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+    
+    if (showArchive) return matchesSearch;
+    return matchesSearch && isCurrentMonth;
+  });
 
   const handleUpdateItemQuantity = (itemId: string, qty: string) => {
     const val = parseInt(qty) || 1;
@@ -207,29 +215,43 @@ const QuotesView: React.FC = () => {
   return (
     <div className="space-y-6 animate-fade-in">
         <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-black text-brand-900 uppercase">Proformas</h2>
-            <button onClick={() => setViewMode('create')} className="px-6 py-2 bg-zinc-950 text-white rounded-xl text-[9px] font-black uppercase">+ Nueva Proforma</button>
+            <div className="flex items-center gap-4">
+              {viewMode === 'create' && (
+                <button onClick={resetForm} className="w-10 h-10 bg-white shadow-soft rounded-full flex items-center justify-center text-zinc-400 hover:text-brand-900 transition-all">←</button>
+              )}
+              <h2 className="text-2xl font-black text-brand-900 uppercase">Proformas</h2>
+            </div>
+            <button onClick={() => setViewMode('create')} className="px-6 py-2 bg-zinc-950 text-white rounded-xl text-[9px] font-black uppercase tracking-widest">+ Nueva Proforma</button>
         </div>
 
         {viewMode === 'list' ? (
           <>
-            <div className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100">
-                <input className="w-full bg-zinc-50 border-none p-2.5 rounded-lg text-xs font-bold outline-none" placeholder="Buscar..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <div className="flex flex-col md:flex-row gap-4 mb-3">
+              <div className="flex-1 relative">
+                  <input className="w-full bg-white border border-zinc-100 p-2.5 pl-12 rounded-xl text-xs font-bold outline-none shadow-soft" placeholder="Buscar cotización..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 grayscale opacity-30">🔍</span>
+              </div>
+              <button 
+                onClick={() => setShowArchive(!showArchive)}
+                className={`px-6 rounded-xl font-black text-[9px] uppercase border transition-all ${showArchive ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-400'}`}
+              >
+                {showArchive ? '📁 Ver Mes Actual' : '📂 Ver Histórico'}
+              </button>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pb-20">
-                {filtered.map(q => (
-                    <div key={q.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col h-full group">
+                {filteredQuotes.map(q => (
+                    <div key={q.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col h-full group hover:border-brand-200 transition-all">
                         <div className="flex justify-between mb-1">
                             <span className="text-[7px] font-black text-zinc-300">PRO-{q.orderNumber}</span>
                             <span className="text-[9px] font-black text-brand-900">$ {q.total.toFixed(2)}</span>
                         </div>
-                        <h3 className="text-[10px] font-black text-zinc-800 uppercase truncate mb-3">{q.clientName}</h3>
-                        <div className="mt-auto space-y-1">
+                        <h3 className="text-[10px] font-black text-zinc-800 uppercase truncate mb-1">{q.clientName}</h3>
+                        <div className="mt-auto space-y-1 pt-2">
                             <button onClick={() => handleConfirmOrder(q)} className="w-full py-1 bg-emerald-600 text-white rounded text-[8px] font-black uppercase">Confirmar</button>
                             <div className="flex gap-1">
                                 <button onClick={() => handleEdit(q)} className="flex-1 py-1 bg-zinc-50 text-blue-500 rounded text-[8px] font-black uppercase">Edit</button>
-                                <button onClick={() => storageService.deleteEvent(q.id)} className="w-8 h-8 bg-zinc-50 text-rose-300 rounded flex items-center justify-center">✕</button>
+                                <button onClick={() => storageService.deleteEvent(q.id)} className="w-8 h-8 bg-zinc-50 text-rose-300 rounded flex items-center justify-center hover:text-rose-600">✕</button>
                             </div>
                         </div>
                     </div>
@@ -247,14 +269,25 @@ const QuotesView: React.FC = () => {
                                 {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
                             </select>
                             <div className="grid grid-cols-2 gap-2">
-                                <input type="date" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={quoteData.executionDate} onChange={e => setQuoteData({...quoteData, executionDate: e.target.value})} />
-                                <input type="number" min="1" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={quoteData.rentalDays} onChange={e => setQuoteData({...quoteData, rentalDays: parseInt(e.target.value) || 1})} placeholder="Días" />
+                               <div className="space-y-1">
+                                   <label className="text-[7px] font-black text-zinc-400 px-2 uppercase">Fecha Evento</label>
+                                   <input type="date" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={quoteData.executionDate} onChange={e => setQuoteData({...quoteData, executionDate: e.target.value})} />
+                                </div>
+                                <div className="space-y-1">
+                                   <label className="text-[7px] font-black text-zinc-400 px-2 uppercase">Días Renta</label>
+                                   <input type="number" min="1" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={quoteData.rentalDays} onChange={e => setQuoteData({...quoteData, rentalDays: parseInt(e.target.value) || 1})} placeholder="Días" />
+                                </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 <input type="checkbox" checked={quoteData.deliveryCost > 0} onChange={e => setQuoteData({...quoteData, deliveryCost: e.target.checked ? 10 : 0})} />
                                 <span className="text-[8px] font-black uppercase">¿Añadir Transporte?</span>
                             </div>
-                            {quoteData.deliveryCost > 0 && <input type="text" inputMode="decimal" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={quoteData.deliveryCost} onChange={e => handleDecimalInput(e.target.value, 'deliveryCost')} />}
+                            {quoteData.deliveryCost > 0 && (
+                              <div className="space-y-2 animate-fade-in">
+                                <input type="text" inputMode="decimal" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={quoteData.deliveryCost} onChange={e => handleDecimalInput(e.target.value, 'deliveryCost')} placeholder="Costo $" />
+                                <input type="text" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={quoteData.deliveryAddress || ''} onChange={e => setQuoteData({...quoteData, deliveryAddress: e.target.value})} placeholder="Dirección de Entrega *" />
+                              </div>
+                            )}
                         </div>
 
                         <div className="p-5 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-2">

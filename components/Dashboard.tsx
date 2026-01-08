@@ -5,14 +5,33 @@ import { EventOrder, EventStatus } from '../types';
 const Dashboard: React.FC = () => {
   const [events, setEvents] = useState<EventOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
 
   useEffect(() => {
     const unsub = storageService.subscribeToEvents(all => {
       setEvents(all);
       setLoading(false);
     });
-    return () => unsub();
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      unsub();
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
   }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') setInstallPrompt(null);
+  };
 
   const today = new Date();
   const next7Days = new Date();
@@ -29,9 +48,21 @@ const Dashboard: React.FC = () => {
   if (loading) return <div className="animate-pulse flex flex-col gap-4"><div className="h-40 bg-white rounded-3xl"></div></div>;
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-8 animate-fade-in pb-10">
+      {installPrompt && (
+        <div className="bg-gradient-to-r from-brand-900 to-brand-700 p-6 rounded-3xl shadow-premium flex flex-col md:flex-row justify-between items-center gap-4 border border-brand-800 animate-slide-up">
+           <div className="flex items-center gap-4 text-center md:text-left">
+              <span className="text-4xl">📱</span>
+              <div>
+                 <h3 className="text-white font-black uppercase text-sm tracking-widest">Instalar App Nativa</h3>
+                 <p className="text-brand-100 text-[10px] font-medium">Accede más rápido y trabaja sin conexión desde tu escritorio o móvil.</p>
+              </div>
+           </div>
+           <button onClick={handleInstallClick} className="px-8 py-3 bg-white text-brand-900 rounded-xl font-black uppercase text-[10px] shadow-2xl active:scale-95 transition-all">Instalar Ahora</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
         {/* Tablero Operativo Semanal */}
         <div className="lg:col-span-2 space-y-4">
           <h2 className="text-xl font-black text-brand-950 uppercase tracking-tighter flex items-center gap-2">
@@ -48,6 +79,7 @@ const Dashboard: React.FC = () => {
                   <div className="flex-1">
                     <p className="text-[10px] font-black text-zinc-950 uppercase mb-0.5">{e.clientName}</p>
                     <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">🗓️ {e.executionDate} • {e.requiresDelivery ? 'C/T' : 'S/T'}</p>
+                    {e.warehouseExitNumber && <span className="text-[8px] font-black text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded uppercase">EB N°: {e.warehouseExitNumber}</span>}
                   </div>
                   <div className="text-right">
                     <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase ${
@@ -73,7 +105,10 @@ const Dashboard: React.FC = () => {
             <div className="space-y-3">
               {alerts.map(e => (
                 <div key={e.id} className="bg-white/80 p-3 rounded-xl border border-rose-200">
-                  <p className="text-[10px] font-black text-rose-950 uppercase mb-1">#ORD-{e.orderNumber}</p>
+                  <div className="flex justify-between items-start">
+                    <p className="text-[10px] font-black text-rose-950 uppercase mb-1">#ORD-{e.orderNumber}</p>
+                    {e.warehouseExitNumber && <span className="text-[7px] font-black text-zinc-400">EB:{e.warehouseExitNumber}</span>}
+                  </div>
                   <p className="text-[9px] text-rose-700 font-bold uppercase">{e.returnNotes || 'Sin descripción de novedad'}</p>
                 </div>
               ))}
@@ -90,7 +125,7 @@ const Dashboard: React.FC = () => {
                 <div key={e.id} className="bg-white/80 p-3 rounded-xl border border-emerald-200 flex justify-between items-center">
                   <div>
                     <p className="text-[10px] font-black text-emerald-950 uppercase">{e.clientName}</p>
-                    <p className="text-[8px] text-emerald-500 font-black">SALDO: $ {(e.total - e.paidAmount).toFixed(2)}</p>
+                    <p className="text-[8px] text-emerald-500 font-black">SALDO: $ {(e.total - e.paidAmount - (e.withheldAmount || 0)).toFixed(2)}</p>
                   </div>
                   <span className="text-xs">💸</span>
                 </div>

@@ -8,6 +8,8 @@ const DRAFT_KEY = 'logistik_order_draft';
 
 const EventsView: React.FC = () => {
   const [view, setView] = useState<'LIST' | 'FORM'>('LIST');
+  const [showArchive, setShowArchive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [clients, setClients] = useState<Client[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<EventOrder[]>([]);
@@ -21,10 +23,12 @@ const EventsView: React.FC = () => {
   // Form State
   const [orderData, setOrderData] = useState<any>({
     clientId: '',
+    warehouseExitNumber: '',
     executionDate: new Date().toISOString().split('T')[0],
     rentalDays: 1,
     requiresDelivery: false,
     deliveryCost: 0,
+    deliveryAddress: '',
     hasInvoice: false,
     discountValue: 0,
     discountType: 'VALUE',
@@ -44,7 +48,6 @@ const EventsView: React.FC = () => {
     const session = storageService.getCurrentSession();
     if (session) setUserRole(session.role);
 
-    // Cargar borrador si existe
     const savedDraft = localStorage.getItem(DRAFT_KEY);
     if (savedDraft) {
       const { data, items } = JSON.parse(savedDraft);
@@ -54,7 +57,6 @@ const EventsView: React.FC = () => {
     }
   }, []);
 
-  // Persistir borrador automáticamente
   useEffect(() => {
     if (view === 'FORM' && !editingId && (orderData.clientId || selectedItems.length > 0)) {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ data: orderData, items: selectedItems }));
@@ -98,16 +100,13 @@ const EventsView: React.FC = () => {
 
   const handleSave = async () => {
     if (!orderData.clientId || selectedItems.length === 0) return uiService.alert("Faltan Datos", "Seleccione cliente y productos.");
+    if (orderData.requiresDelivery && !orderData.deliveryAddress) return uiService.alert("Dato Requerido", "Por favor ingrese la dirección de entrega.");
     
     if (userRole === UserRole.STAFF) {
       const base = calculateDiscountableBase();
       const dVal = parseFloat(String(orderData.discountValue)) || 0;
-      if (orderData.discountType === 'PERCENT' && dVal > 10) {
-        return uiService.alert("Acceso Restringido", "Como STAFF, el descuento máximo permitido es 10%.");
-      }
-      if (orderData.discountType === 'VALUE' && dVal > (base * 0.10)) {
-        return uiService.alert("Acceso Restringido", `Como STAFF, el descuento máximo permitido es $${(base * 0.10).toFixed(2)} (10% del subtotal descontable).`);
-      }
+      if (orderData.discountType === 'PERCENT' && dVal > 10) return uiService.alert("Acceso Restringido", "Como STAFF, el descuento máximo permitido es 10%.");
+      if (orderData.discountType === 'VALUE' && dVal > (base * 0.10)) return uiService.alert("Acceso Restringido", `Máximo permitido: $${(base * 0.10).toFixed(2)}.`);
     }
 
     setLoading(true);
@@ -117,6 +116,7 @@ const EventsView: React.FC = () => {
     const order: EventOrder = {
       id: editingId || '',
       orderNumber,
+      warehouseExitNumber: parseInt(orderData.warehouseExitNumber) || undefined,
       clientId: orderData.clientId,
       clientName: clients.find(c => c.id === orderData.clientId)?.name || 'Consumidor Final',
       orderDate: new Date().toISOString(),
@@ -129,6 +129,7 @@ const EventsView: React.FC = () => {
       items: selectedItems.map(i => ({ itemId: i.id, quantity: i.quantity, priceAtBooking: i.price })),
       requiresDelivery: orderData.requiresDelivery,
       deliveryCost: parseFloat(String(orderData.deliveryCost)) || 0,
+      deliveryAddress: orderData.deliveryAddress,
       hasInvoice: orderData.hasInvoice,
       discountValue: parseFloat(String(orderData.discountValue)) || 0,
       discountType: orderData.discountType,
@@ -146,14 +147,12 @@ const EventsView: React.FC = () => {
     };
 
     await storageService.saveEvent(order);
-    
     if (!editingId) {
         for (const item of selectedItems) {
           if (item.type === 'PRODUCT') await storageService.updateStock(item.id, -item.quantity);
         }
     }
-
-    localStorage.removeItem(DRAFT_KEY); // Limpiar borrador tras éxito
+    localStorage.removeItem(DRAFT_KEY);
     setLoading(false);
     uiService.alert("Éxito", `Pedido #${orderNumber} registrado.`);
     resetForm();
@@ -167,10 +166,12 @@ const EventsView: React.FC = () => {
     localStorage.removeItem(DRAFT_KEY);
     setOrderData({
         clientId: '',
+        warehouseExitNumber: '',
         executionDate: new Date().toISOString().split('T')[0],
         rentalDays: 1,
         requiresDelivery: false,
         deliveryCost: 0,
+        deliveryAddress: '',
         hasInvoice: false,
         discountValue: 0,
         discountType: 'VALUE',
@@ -183,91 +184,57 @@ const EventsView: React.FC = () => {
   };
 
   const handleEdit = (o: EventOrder) => {
-    localStorage.removeItem(DRAFT_KEY); // Evitar conflictos con borrador previo
+    localStorage.removeItem(DRAFT_KEY);
     setEditingId(o.id);
     const itemsWithData = o.items.map(oi => {
         const inv = inventory.find(i => i.id === oi.itemId);
         return { ...inv, quantity: oi.quantity, price: oi.priceAtBooking };
     });
     setSelectedItems(itemsWithData);
-    setOrderData({
-        ...o,
-        paymentAmount: o.paidAmount
+    setOrderData({ 
+        ...o, 
+        warehouseExitNumber: o.warehouseExitNumber || '',
+        paymentAmount: o.paidAmount 
     });
     setView('FORM');
   };
 
-  const handleCancel = async (o: EventOrder) => {
-    if (await uiService.confirm("Anular Pedido", `¿Está seguro de anular el pedido #${o.orderNumber}?`)) {
-        await storageService.saveEvent({ ...o, status: EventStatus.CANCELLED });
-        for (const item of o.items) {
-            await storageService.updateStock(item.itemId, item.quantity);
-        }
-        uiService.alert("Anulado", "Pedido cancelado.");
-    }
-  };
-
   const handleSaveQuickClient = async () => {
-      if (!newClient.name) return uiService.alert("Error", "Nombre obligatorio");
-      const id = Date.now().toString();
-      await storageService.saveClient({ ...newClient, id } as Client);
-      setOrderData({ ...orderData, clientId: id });
+    if (!newClient.name) return uiService.alert("Faltan Datos", "El nombre es obligatorio.");
+    setLoading(true);
+    try {
+      const clientToSave: Client = {
+        id: '',
+        name: newClient.name,
+        documentId: newClient.documentId || '',
+        email: '',
+        phone: newClient.phone || '',
+        mobilePhone: newClient.phone || '',
+        address: newClient.address || ''
+      };
+      await storageService.saveClient(clientToSave);
       setShowClientModal(false);
       setNewClient({ name: '', documentId: '', phone: '', address: '' });
+      uiService.alert("Éxito", "Cliente registrado exitosamente.");
+    } catch (e: any) {
+      uiService.alert("Error", "Error al guardar cliente: " + e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handlePrint = (o: EventOrder) => {
-    const win = window.open('', '_blank');
-    if (!win) return;
-    const client = clients.find(c => c.id === o.clientId);
-    const rows = o.items.map(oi => {
-      const it = inventory.find(inv => inv.id === oi.itemId);
-      return `<tr><td>${it?.name}</td><td>${oi.quantity}</td><td>$ ${oi.priceAtBooking.toFixed(2)}</td><td>$ ${(oi.quantity * oi.priceAtBooking * (o.rentalDays || 1)).toFixed(2)}</td></tr>`;
-    });
-    if (o.deliveryCost && o.deliveryCost > 0) {
-      rows.push(`<tr><td>Transporte y montaje</td><td>1</td><td>$ ${o.deliveryCost.toFixed(2)}</td><td>$ ${o.deliveryCost.toFixed(2)}</td></tr>`);
-    }
-    win.document.write(`
-      <html><head><style>
-        body { font-family: sans-serif; font-size: 10px; margin: 1cm; color: #111; }
-        .header { display: flex; justify-content: space-between; border-bottom: 4px solid #4c0519; padding-bottom: 10px; margin-bottom: 20px; }
-        .logo { height: 50px; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th { background: #f3f4f6; text-align: left; padding: 10px; border-bottom: 2px solid #ddd; text-transform: uppercase; font-size: 8px; }
-        td { padding: 8px; border-bottom: 1px solid #eee; }
-        .totals { float: right; width: 250px; padding: 15px; background: #fff1f2; border-radius: 10px; margin-top: 20px; }
-        .signature { margin-top: 100px; display: grid; grid-template-columns: 1fr 1fr; gap: 50px; text-align: center; }
-        .sig-line { border-top: 1px solid #000; padding-top: 10px; font-weight: bold; }
-      </style></head><body>
-        <div class="header">
-          <img src="${COMPANY_LOGO}" class="logo" />
-          <div style="text-align: right;">
-            <h2 style="margin:0; color:#4c0519;">${COMPANY_NAME}</h2>
-            <p style="margin:2px 0;">ORDEN DE SERVICIO #${o.orderNumber}</p>
-          </div>
-        </div>
-        <div style="background:#f9f9f9; padding:15px; border-radius:10px;">
-          <p><strong>CLIENTE:</strong> ${o.clientName.toUpperCase()}</p>
-          <p><strong>CÉDULA/RUC:</strong> ${client?.documentId || 'N/A'}</p>
-          <p><strong>FECHA EVENTO:</strong> ${o.executionDate} (${o.rentalDays || 1} días)</p>
-          <p><strong>DIRECCIÓN:</strong> ${o.deliveryAddress || client?.address || 'N/A'}</p>
-        </div>
-        <table>
-          <thead><tr><th>Descripción</th><th>Cant</th><th>V. Unit</th><th>Subtotal</th></tr></thead>
-          <tbody>${rows.join('')}</tbody>
-        </table>
-        <div class="totals">
-          <div style="display:flex; justify-content:space-between;"><span>Total Neto:</span><span>$ ${o.total.toFixed(2)}</span></div>
-        </div>
-        <div class="signature">
-          <div class="sig-line">ENTREGADO POR</div>
-          <div class="sig-line">RECIBIDO CONFORME (CLIENTE)</div>
-        </div>
-        <script>window.onload=function(){window.print()}</script>
-      </body></html>
-    `);
-    win.document.close();
-  };
+  const filteredOrders = orders.filter(o => {
+    if (o.status === EventStatus.QUOTE) return false;
+    const orderDate = new Date(o.executionDate);
+    const now = new Date();
+    const isCurrentMonth = orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+    const hasPendingBalance = (o.total - o.paidAmount) > 0.05;
+    const hasIssues = o.status === EventStatus.PARTIAL_RETURN;
+    const matchesSearch = o.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(o.orderNumber).includes(searchQuery);
+
+    if (showArchive) return matchesSearch;
+    return matchesSearch && (isCurrentMonth || hasPendingBalance || hasIssues);
+  });
 
   const handleUpdateItemQuantity = (itemId: string, qty: string) => {
     const val = parseInt(qty) || 1;
@@ -288,37 +255,59 @@ const EventsView: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-black text-brand-950 uppercase tracking-tighter">Venta Directa</h2>
-          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Control de pedidos operativos</p>
+        <div className="flex items-center gap-4">
+          {view === 'FORM' && (
+            <button onClick={resetForm} className="w-10 h-10 bg-white shadow-soft rounded-full flex items-center justify-center text-zinc-400 hover:text-brand-900 transition-all">←</button>
+          )}
+          <div>
+            <h2 className="text-2xl font-black text-brand-950 uppercase tracking-tighter">Venta Directa</h2>
+            <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Gestión operativa de pedidos</p>
+          </div>
         </div>
         <button onClick={() => setView(view === 'LIST' ? 'FORM' : 'LIST')} className="px-6 h-10 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">
-          {view === 'LIST' ? '+ Nuevo Pedido' : 'Volver'}
+          {view === 'LIST' ? '+ Nuevo Pedido' : 'Cancelar'}
         </button>
       </div>
 
       {view === 'LIST' ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pb-20">
-          {orders.filter(o => o.status !== EventStatus.QUOTE).map(o => (
-            <div key={o.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col hover:border-brand-100 transition-all group relative">
-              <div className="flex justify-between mb-1">
-                <span className="text-[7px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
-                <span className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase ${o.status === EventStatus.CANCELLED ? 'bg-zinc-100 text-zinc-400' : 'bg-emerald-50 text-emerald-600'}`}>{o.status}</span>
-              </div>
-              <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate mb-0.5">{o.clientName}</h3>
-              <p className="text-[8px] font-bold text-zinc-400 uppercase mb-3">🗓️ {o.executionDate}</p>
-              <div className="mt-auto space-y-1">
-                <div className="flex gap-1">
-                    <button onClick={() => handlePrint(o)} className="flex-1 py-1 bg-zinc-900 text-white rounded text-[8px] font-black uppercase">🖨️</button>
-                    <button onClick={() => handleEdit(o)} className="w-8 h-8 flex items-center justify-center bg-zinc-50 text-blue-500 rounded text-xs">✏️</button>
-                </div>
-                {o.status !== EventStatus.CANCELLED && (
-                    <button onClick={() => handleCancel(o)} className="w-full py-0.5 text-[7px] font-black text-rose-300 hover:text-rose-600 uppercase">Anular</button>
-                )}
-              </div>
+        <>
+          <div className="flex flex-col md:flex-row gap-4 mb-2">
+            <div className="flex-1 relative">
+              <input 
+                className="w-full h-12 bg-white border border-zinc-100 rounded-2xl px-12 text-xs font-bold shadow-soft outline-none focus:ring-2 focus:ring-brand-50" 
+                placeholder="Buscar por cliente o folio..." 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 grayscale opacity-30">🔍</span>
             </div>
-          ))}
-        </div>
+            <button 
+              onClick={() => setShowArchive(!showArchive)}
+              className={`px-6 rounded-2xl font-black text-[9px] uppercase border transition-all ${showArchive ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-400 border-zinc-200'}`}
+            >
+              {showArchive ? '📁 Ver Actuales' : '📂 Ver Histórico'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pb-20">
+            {filteredOrders.map(o => (
+              <div key={o.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col hover:border-brand-100 transition-all group">
+                <div className="flex justify-between mb-1">
+                  <span className="text-[7px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase ${o.status === EventStatus.CANCELLED ? 'bg-zinc-100 text-zinc-400' : 'bg-emerald-50 text-emerald-600'}`}>{o.status}</span>
+                </div>
+                <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate mb-0.5">{o.clientName}</h3>
+                <p className="text-[8px] font-bold text-zinc-400 uppercase">🗓️ {o.executionDate}</p>
+                {o.warehouseExitNumber && <p className="text-[7px] font-black text-brand-600 mt-1 uppercase">EB N°: {o.warehouseExitNumber}</p>}
+                <div className="mt-auto space-y-1 pt-3">
+                  <div className="flex gap-1">
+                      <button onClick={() => handleEdit(o)} className="w-full py-1.5 bg-zinc-50 text-brand-900 rounded-lg text-[8px] font-black uppercase">Detalles</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       ) : (
         <div className="bg-white rounded-[2rem] p-6 md:p-8 shadow-premium border border-zinc-100 animate-slide-up">
            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -333,15 +322,30 @@ const EventsView: React.FC = () => {
                        <button onClick={() => setShowClientModal(true)} className="w-10 h-10 bg-brand-900 text-white rounded-xl font-black text-xl">+</button>
                    </div>
                    <div className="grid grid-cols-2 gap-2">
-                      <input type="date" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.executionDate} onChange={e => setOrderData({...orderData, executionDate: e.target.value})} />
-                      <input type="number" min="1" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.rentalDays} onChange={e => setOrderData({...orderData, rentalDays: parseInt(e.target.value) || 1})} placeholder="Días" />
+                      <div className="space-y-1">
+                         <label className="text-[7px] font-black text-zinc-400 px-2 uppercase">EB N° (Egreso)</label>
+                         <input type="number" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.warehouseExitNumber || ''} onChange={e => setOrderData({...orderData, warehouseExitNumber: e.target.value})} placeholder="0000" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[7px] font-black text-zinc-400 px-2 uppercase">Fecha Evento</label>
+                        <input type="date" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.executionDate} onChange={e => setOrderData({...orderData, executionDate: e.target.value})} />
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[7px] font-black text-zinc-400 px-2 uppercase">Días Renta</label>
+                        <input type="number" min="1" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.rentalDays} onChange={e => setOrderData({...orderData, rentalDays: parseInt(e.target.value) || 1})} placeholder="Días" />
+                      </div>
                    </div>
                    <div className="flex items-center gap-2 bg-white px-4 rounded-xl border border-zinc-200 h-10">
                       <input type="checkbox" checked={orderData.requiresDelivery} onChange={e => setOrderData({...orderData, requiresDelivery: e.target.checked})} />
-                      <span className="text-[8px] font-black uppercase">Transporte</span>
+                      <span className="text-[8px] font-black uppercase">Servicio de Transporte</span>
                    </div>
                    {orderData.requiresDelivery && (
-                     <input type="text" inputMode="decimal" placeholder="Valor Transporte $" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.deliveryCost || ''} onChange={e => handleDecimalInput(e.target.value, 'deliveryCost')} />
+                     <div className="space-y-2 animate-fade-in">
+                        <input type="text" inputMode="decimal" placeholder="Valor Transporte $" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.deliveryCost || ''} onChange={e => handleDecimalInput(e.target.value, 'deliveryCost')} />
+                        <input type="text" placeholder="Dirección Exacta de Entrega *" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.deliveryAddress || ''} onChange={e => setOrderData({...orderData, deliveryAddress: e.target.value})} />
+                     </div>
                    )}
                 </div>
 
@@ -424,7 +428,7 @@ const EventsView: React.FC = () => {
 
       {showClientModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
-              <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-premium border border-white">
+              <div className="bg-white rounded-3xl p-6 w-full max-sm shadow-premium border border-white animate-slide-up">
                   <h3 className="text-lg font-black text-brand-900 uppercase mb-4 tracking-tighter">Nuevo Cliente</h3>
                   <div className="space-y-3">
                       <input placeholder="Razón Social" className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} />
