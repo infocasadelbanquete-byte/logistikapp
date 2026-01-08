@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -57,7 +56,6 @@ const UserView: React.FC = () => {
   );
 
   const pendingUsers = filteredUsers.filter(u => u.status === 'PENDIENTE');
-  const lockedUsers = filteredUsers.filter(u => u.isLocked);
   const activeUsers = filteredUsers.filter(u => u.status !== 'PENDIENTE' && !u.isLocked); 
 
   return (
@@ -85,7 +83,39 @@ const UserView: React.FC = () => {
         </table>
       </div>
 
-      {isModalOpen && (<div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm flex items-center justify-center p-4 z-50"><div className="bg-white rounded-[2rem] shadow-premium w-full max-sm p-8 animate-slide-up"><h3 className="text-lg font-black text-brand-950 uppercase mb-6 tracking-tighter">{editingId ? 'Modificar Perfil' : 'Alta de Usuario'}</h3><form onSubmit={handleSubmit} className="space-y-4"><div><label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre Completo</label><input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required /></div><div><label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre de Usuario</label><input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value.replace(/\s/g, ''))} required disabled={!!editingId} /></div><div><label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Contraseña de Acceso</label><input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required /></div><div><label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nivel de Permisos</label><select className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-[10px] font-black outline-none" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as UserRole})}><option value={UserRole.STAFF}>Personal Operativo</option><option value={UserRole.ADMIN}>Administración</option><option value={UserRole.SUPER_ADMIN}>Gerencia Total</option></select></div><div className="flex gap-3 pt-4"><button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[9px]">Atrás</button><button type="submit" className="flex-2 h-14 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">Guardar Cambios</button></div></form></div></div>)}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-[2rem] shadow-premium w-full max-sm p-8 animate-slide-up">
+            <h3 className="text-lg font-black text-brand-950 uppercase mb-6 tracking-tighter">{editingId ? 'Modificar Perfil' : 'Alta de Usuario'}</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre Completo</label>
+                <input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre de Usuario</label>
+                <input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value.replace(/\s/g, '')})} required disabled={!!editingId} />
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Contraseña de Acceso</label>
+                <input className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-xs font-bold" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} required />
+              </div>
+              <div>
+                <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nivel de Permisos</label>
+                <select className="w-full bg-zinc-50 rounded-xl h-12 px-4 text-[10px] font-black outline-none" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value as UserRole})}>
+                  <option value={UserRole.STAFF}>Personal Operativo</option>
+                  <option value={UserRole.ADMIN}>Administración</option>
+                  <option value={UserRole.SUPER_ADMIN}>Gerencia Total</option>
+                </select>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[9px]">Atrás</button>
+                <button type="submit" className="flex-2 h-14 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {approvalUser && (<div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-md flex items-center justify-center p-4 z-50"><div className="bg-white rounded-[2rem] shadow-premium w-full max-sm p-10 animate-slide-up"><h3 className="text-xl font-black text-zinc-950 uppercase mb-2">Aprobar Perfil</h3><p className="text-[10px] font-bold text-zinc-400 mb-6 uppercase">Solicitante: {approvalUser.name}</p><div className="space-y-3"><button onClick={() => confirmApproval(UserRole.STAFF)} className="w-full text-left p-4 bg-zinc-50 rounded-2xl hover:bg-zinc-100 transition-all font-black text-[10px] uppercase">Persona Operativo</button><button onClick={() => confirmApproval(UserRole.ADMIN)} className="w-full text-left p-4 bg-zinc-50 rounded-2xl hover:bg-zinc-100 transition-all font-black text-[10px] uppercase">Administración</button><button onClick={() => confirmApproval(UserRole.SUPER_ADMIN)} className="w-full text-left p-4 bg-brand-900 text-white rounded-2xl font-black text-[10px] uppercase">Gerencia Pro</button></div><div className="mt-8 pt-4 border-t flex justify-between"><button onClick={() => setApprovalUser(null)} className="text-zinc-300 font-black uppercase text-[9px]">Cancelar</button></div></div></div>)}
     </div>
   );
