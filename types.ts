@@ -14,8 +14,9 @@ export interface User {
   role: UserRole;
   status?: UserStatus;
   lastActive?: string;
-  failedLoginAttempts?: number;
+  // Added security fields
   isLocked?: boolean;
+  failedLoginAttempts?: number;
 }
 
 export interface Client {
@@ -29,17 +30,8 @@ export interface Client {
   address: string;
 }
 
-export interface Provider {
-  id: string;
-  name: string;
-  documentId: string;
-  email?: string;
-  phone?: string;
-  mobile?: string;
-  address?: string;
-}
-
 export type InventoryType = 'PRODUCT' | 'SERVICE';
+// Added PresentationType for inventory management
 export type PresentationType = 'UNIT' | 'BOX';
 
 export interface InventoryItem {
@@ -53,23 +45,24 @@ export interface InventoryItem {
   type: InventoryType;
   images: string[];
   code?: string;
+  // Added extended inventory fields
   brand?: string;
   model?: string;
   presentationType?: PresentationType;
   quantityPerBox?: number;
-  uses?: string;
   extraNotes?: string;
 }
 
 export enum EventStatus {
   QUOTE = 'QUOTE',
-  RESERVED = 'RESERVED',
-  DELIVERED = 'DELIVERED',
-  IN_PROGRESS = 'IN_PROGRESS',
-  FINISHED = 'FINISHED',
-  WITH_ISSUES = 'WITH_ISSUES',
-  RETURNED = 'RETURNED',
-  CANCELLED = 'CANCELLED'
+  CONFIRMED = 'CONFIRMADO',
+  DISPATCHED = 'DESPACHADO',
+  DELIVERED = 'ENTREGADO',
+  PARTIAL_RETURN = 'RETIRO PARCIAL',
+  FINISHED = 'FINALIZADO',
+  CANCELLED = 'CANCELLED',
+  // Added RETURNED status for backward compatibility or specific flows
+  RETURNED = 'RETURNED'
 }
 
 export enum PaymentStatus {
@@ -91,27 +84,12 @@ export interface PaymentTransaction {
   date: string;
   amount: number;
   method: PaymentMethod;
-  bankName?: string;
   recordedBy: string;
   orderNumber: number;
+  // Added transaction metadata
+  bankName?: string;
   isVoid?: boolean;
   voidReason?: string;
-  notes?: string;
-}
-
-export interface MissingItem {
-  itemId: string;
-  itemName: string;
-  missingQuantity: number;
-  replacementCost: number;
-}
-
-export interface ReturnReport {
-  date: string;
-  observations: string;
-  missingItems: MissingItem[];
-  totalReplacementCost: number;
-  reportedBy: string;
 }
 
 export interface EventOrder {
@@ -119,56 +97,63 @@ export interface EventOrder {
   orderNumber: number;
   clientId: string;
   clientName: string;
-  title: string;
   orderDate: string;
   executionDate: string; 
-  executionDates?: string[]; 
   status: EventStatus;
-  cancelReason?: string;
   paymentStatus: PaymentStatus;
   paidAmount: number;
-  withheldAmount?: number;
-  transactions?: PaymentTransaction[];
+  total: number;
+  items: Array<{ itemId: string; quantity: number; priceAtBooking: number }>;
   requiresDelivery?: boolean;
   deliveryCost?: number;
   deliveryAddress?: string;
-  requiresWaiters?: boolean; 
-  waitersCount?: number;
-  waitersPrice?: number;
   hasInvoice?: boolean;
+  rentalDays?: number;
+  discountPercentage?: number;
+  discountType?: 'PERCENT' | 'VALUE';
+  notes?: string;
+  returnNotes?: string;
+  // Added missing order properties
+  transactions?: PaymentTransaction[];
+  withheldAmount?: number;
   invoiceGenerated?: boolean;
   invoiceNumber?: string;
-  taxAmount?: number;
-  rentalDays?: number;
-  discountPercentage?: number; 
-  discountType?: 'PERCENT' | 'VALUE'; 
-  warehouseExitId?: string;
-  originQuoteNumber?: number;
-  dispatchedBy?: string;
-  dispatchNotes?: string;
-  items: Array<{ itemId: string; quantity: number; priceAtBooking: number }>;
-  total: number;
-  notes?: string;
-  returnReport?: ReturnReport;
+}
+
+// Added missing global types used across services
+export interface AppNotification {
+  id: string;
+  message: string;
+  date: string;
+  type: 'INFO' | 'SUCCESS' | 'WARNING';
+  isRead: boolean;
+}
+
+export interface CompanySettings {
+  name: string;
+  slogan: string;
+  logoUrl: string;
 }
 
 export enum PurchaseDocType {
   INVOICE = 'FACTURA',
-  RECEIPT = 'NOTA DE VENTA',
-  RISE = 'RISE',
-  OTHER = 'OTRO'
+  RECEIPT = 'RECIBO',
+  RISE = 'RISE'
+}
+
+export interface Provider {
+  id: string;
+  name: string;
+  documentId: string;
+  phone?: string;
+  mobile?: string;
+  email?: string;
 }
 
 export interface PurchaseTransaction {
   id: string;
   date: string;
-  provider: {
-    name: string;
-    documentId: string;
-    phone?: string;
-    mobile?: string;
-    email?: string;
-  };
+  provider: Provider;
   details: string;
   docType: PurchaseDocType;
   docNumber: string;
@@ -196,37 +181,23 @@ export interface Withholding {
   type: 'IVA' | 'RENTA';
   percentage: number;
   amount: number;
-  relatedDocNumber: string; 
-  relatedOrderId?: string;  
-  beneficiary: string;      
   clientId: string;
+  beneficiary: string;
+  relatedOrderId?: string;
+  relatedDocNumber?: string;
 }
 
 export interface PayrollEntry {
   id: string;
   date: string;
-  period: string; 
+  period: string;
   salaries: number;
   overtime: number;
   iess: number;
   bonuses: number;
-  extraPay: number; 
+  extraPay: number;
   totalDeductions: number;
   netPaid: number;
-}
-
-export interface AppNotification {
-  id: string;
-  message: string;
-  date: string;
-  type: 'INFO' | 'SUCCESS' | 'WARNING';
-  isRead: boolean;
-}
-
-export interface CompanySettings {
-  name: string;
-  slogan: string;
-  logoUrl: string;
 }
 
 export interface AuthState {

@@ -1,85 +1,125 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus } from '../../types';
+import { EventOrder, EventStatus, PaymentMethod, PaymentStatus } from '../../types';
 import { storageService } from '../../services/storageService';
-import { uiService } from '../../services/uiService'; 
+import { uiService } from '../../services/uiService';
 
 const DispatchView: React.FC = () => {
-  const [allOrders, setAllOrders] = useState<EventOrder[]>([]);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'LOGISTICA' | 'RETIRO' | 'HISTORIAL'>('LOGISTICA');
+  const [orders, setOrders] = useState<EventOrder[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'LOGISTICA' | 'RETIROS' | 'ARCHIVO'>('LOGISTICA');
+  const [selectedOrder, setSelectedOrder] = useState<EventOrder | null>(null);
+  const [novedades, setNovedades] = useState('');
+  const [montoCobro, setMontoCobro] = useState('');
 
   useEffect(() => {
-    const unsub = storageService.subscribeToEvents((events) => {
-        // RESTITUCIÓN: Se incluyen estados equivalentes a Reservado y Entregado
-        const relevant = events.filter(e => {
-            const s = String(e.status).toUpperCase();
-            return s === 'RESERVED' || s === 'RESERVADO' || s === 'CONFIRMADO' || s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO';
-        });
-        relevant.sort((a, b) => new Date(a.executionDate).getTime() - new Date(b.executionDate).getTime());
-        setAllOrders(relevant);
-    });
+    const unsub = storageService.subscribeToEvents(setOrders);
     return () => unsub();
   }, []);
 
-  const confirmDelivery = async (order: EventOrder) => {
-      if (!(await uiService.confirm("Confirmar Despacho", "¿Confirma la salida física de este mobiliario de la bodega?"))) return;
-      setIsProcessing(order.id);
-      try {
-          await storageService.saveEvent({ ...order, status: EventStatus.DELIVERED });
-          uiService.alert("Éxito", "Despacho registrado correctamente.");
-      } catch (error) { uiService.alert("Error", "Fallo al procesar."); } finally { setIsProcessing(null); }
+  const today = new Date().toISOString().split('T')[0];
+
+  // Filtros de lógica solicitada
+  const toDispatch = orders.filter(o => o.status === EventStatus.CONFIRMED && o.executionDate >= today);
+  const toPickup = orders.filter(o => (o.status === EventStatus.DELIVERED || o.status === EventStatus.DISPATCHED || o.status === EventStatus.PARTIAL_RETURN) && o.executionDate <= today);
+  const archived = orders.filter(o => o.status === EventStatus.FINISHED);
+
+  const displayed = (activeTab === 'LOGISTICA' ? toDispatch : activeTab === 'RETIROS' ? toPickup : archived)
+    .filter(o => o.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(o.orderNumber).includes(searchQuery));
+
+  const handleUpdateStatus = async (o: EventOrder, s: EventStatus) => {
+      await storageService.saveEvent({ ...o, status: s });
+      uiService.alert("Actualizado", `Pedido #${o.orderNumber} marcado como ${s}.`);
   };
 
-  const displayedOrders = allOrders.filter(o => {
-      const s = String(o.status).toUpperCase();
-      const isDelivered = s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO';
-      if (activeTab === 'HISTORIAL') return isDelivered;
-      return !isDelivered && (activeTab === 'LOGISTICA' ? o.requiresDelivery : !o.requiresDelivery);
-  });
+  const handleFinalizePickup = async (o: EventOrder, hasIssues: boolean) => {
+      if (!hasIssues) {
+          await storageService.saveEvent({ ...o, status: EventStatus.FINISHED });
+          uiService.alert("Éxito", "Pedido finalizado y archivado.");
+      } else {
+          await storageService.saveEvent({ ...o, status: EventStatus.PARTIAL_RETURN, returnNotes: novedades });
+          uiService.alert("Aviso", "Pedido marcado con novedades. Queda en Retiro Parcial.");
+      }
+      setSelectedOrder(null);
+      setNovedades('');
+  };
+
+  const handleCobrar = async (o: EventOrder) => {
+      const monto = parseFloat(montoCobro);
+      if (isNaN(monto) || monto <= 0) return;
+      const nuevoPagado = o.paidAmount + monto;
+      const t: any = { id: Date.now().toString(), amount: monto, date: new Date().toISOString(), method: PaymentMethod.CASH, recordedBy: 'Admin', orderNumber: o.orderNumber };
+      await storageService.saveEvent({ ...o, paidAmount: nuevoPagado, transactions: [...(o.transactions || []), t] });
+      setMontoCobro('');
+      uiService.alert("Cobro", "Pago registrado correctamente.");
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in p-2 md:p-6">
+    <div className="space-y-6 animate-fade-in">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <h2 className="text-2xl font-black text-brand-900 uppercase tracking-tighter">Gestión de Salidas</h2>
-            <div className="flex bg-white p-1 rounded-2xl shadow-soft border border-zinc-100 w-full md:w-auto">
-                {['LOGISTICA', 'RETIRO', 'HISTORIAL'].map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab as any)} className={`flex-1 md:flex-none px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === tab ? 'bg-brand-900 text-white shadow-md' : 'text-zinc-400'}`}>{tab}</button>
+            <h2 className="text-2xl font-black text-brand-900 uppercase">Gestión Logística</h2>
+            <div className="flex bg-zinc-100 p-1 rounded-2xl">
+                {['LOGISTICA', 'RETIROS', 'ARCHIVO'].map(tab => (
+                    <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === tab ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>{tab}</button>
                 ))}
             </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-            {displayedOrders.map(order => {
-                const s = String(order.status).toUpperCase();
-                const isDelivered = s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO';
 
-                return (
-                    <div key={order.id} className="bg-white rounded-[2rem] shadow-soft border border-zinc-100 flex flex-col p-6 group">
-                        <div className="flex justify-between items-center mb-4">
-                            <span className="font-mono font-black text-zinc-300 text-[9px]">#ORD-{order.orderNumber}</span>
-                            <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${isDelivered ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>{isDelivered ? 'En Campo' : 'Por Salir'}</span>
-                        </div>
-                        <h3 className="text-xs font-black text-zinc-950 truncate uppercase mb-1">{order.clientName}</h3>
-                        <p className="text-[9px] font-bold text-zinc-400 uppercase mb-4">🗓️ {order.executionDate}</p>
-                        <div className="bg-zinc-50 p-3 rounded-xl mb-6">
-                            <p className="text-[8px] font-black text-zinc-400 uppercase mb-1">Destino:</p>
-                            <p className="text-[9px] font-bold text-zinc-800 uppercase leading-tight">{order.deliveryAddress || 'Retiro en Local'}</p>
-                        </div>
-                        <div className="mt-auto">
-                            {!isDelivered ? (
-                                <button onClick={() => confirmDelivery(order)} disabled={isProcessing === order.id} className="w-full py-3 bg-brand-900 text-white rounded-xl text-[10px] font-black uppercase shadow-lg active:scale-95 transition-all">
-                                    {isProcessing === order.id ? '...' : 'Registrar Salida'}
-                                </button>
-                            ) : (
-                                <div className="text-center p-2 bg-emerald-50 rounded-xl border border-emerald-100">
-                                    <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest italic">Mobiliario Despachado</span>
-                                </div>
-                            )}
+        <div className="bg-white p-4 rounded-2xl shadow-soft border border-zinc-100">
+            <div className="relative">
+                <input className="w-full bg-zinc-50 border-none p-3 pl-12 rounded-xl text-xs font-bold outline-none" placeholder="Buscar cliente o pedido..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 opacity-30">🔍</span>
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
+            {displayed.map(o => (
+                <div key={o.id} className="bg-white p-6 rounded-[2rem] shadow-soft border-t-8 border-brand-900 flex flex-col">
+                    <div className="flex justify-between mb-4">
+                        <span className="text-[10px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
+                        <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded-full ${o.status === EventStatus.CONFIRMED ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{o.status}</span>
+                    </div>
+                    <h3 className="text-xs font-black text-zinc-950 uppercase mb-1">{o.clientName}</h3>
+                    <p className="text-[9px] font-bold text-zinc-400 uppercase mb-4">🗓️ {o.executionDate}</p>
+                    
+                    <div className="bg-zinc-50 p-3 rounded-xl mb-4 text-[9px] font-black uppercase">
+                        <div className="flex justify-between"><span>Saldo Pendiente:</span> <span className="text-rose-600">$ {(o.total - o.paidAmount).toFixed(2)}</span></div>
+                    </div>
+
+                    <div className="mt-auto space-y-2">
+                        {activeTab === 'LOGISTICA' && (
+                            <div className="flex gap-2">
+                                <button onClick={() => handleUpdateStatus(o, EventStatus.DISPATCHED)} className="flex-1 py-2 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase">Despachado</button>
+                                <button onClick={() => handleUpdateStatus(o, EventStatus.DELIVERED)} className="flex-1 py-2 bg-emerald-600 text-white rounded-lg text-[8px] font-black uppercase">Entregado</button>
+                            </div>
+                        )}
+                        {activeTab === 'RETIROS' && (
+                            <button onClick={() => setSelectedOrder(o)} className="w-full py-3 bg-brand-900 text-white rounded-lg text-[8px] font-black uppercase">Procesar Ingreso / Retiro</button>
+                        )}
+                        <div className="flex gap-2">
+                            <input type="number" placeholder="$" className="w-16 h-8 bg-zinc-100 rounded px-2 text-xs font-black" value={montoCobro} onChange={e=>setMontoCobro(e.target.value)} />
+                            <button onClick={() => handleCobrar(o)} className="flex-1 h-8 bg-zinc-100 text-zinc-600 rounded text-[7px] font-black uppercase">Registrar Cobro</button>
                         </div>
                     </div>
-                );
-            })}
-            {displayedOrders.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros que procesar</div>}
+                </div>
+            ))}
         </div>
+
+        {selectedOrder && (
+            <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-md flex items-center justify-center p-4 z-[100]">
+                <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-premium animate-slide-up">
+                    <h3 className="text-lg font-black text-brand-950 uppercase mb-4">Control de Retiro</h3>
+                    <div className="space-y-4">
+                        <p className="text-[10px] font-bold text-zinc-500 uppercase">¿El pedido presenta novedades (roturas, falta de limpieza, pérdidas)?</p>
+                        <textarea className="w-full h-24 bg-zinc-50 rounded-xl p-4 text-xs font-bold outline-none border border-zinc-100" placeholder="Describa daños o faltantes..." value={novedades} onChange={e=>setNovedades(e.target.value)} />
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => handleFinalizePickup(selectedOrder, false)} className="py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[9px]">Sin Novedades</button>
+                            <button onClick={() => handleFinalizePickup(selectedOrder, true)} className="py-4 bg-rose-600 text-white rounded-xl font-black uppercase text-[9px]">Con Novedades</button>
+                        </div>
+                        <button onClick={() => setSelectedOrder(null)} className="w-full py-2 text-zinc-300 font-black uppercase text-[8px]">Cancelar</button>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 };
