@@ -1,4 +1,3 @@
-
 export enum UserRole {
   SUPER_ADMIN = 'SUPER_ADMIN',
   ADMIN = 'ADMIN',
@@ -63,14 +62,14 @@ export interface InventoryItem {
 }
 
 export enum EventStatus {
-  QUOTE = 'Proforma',
-  RESERVED = 'Reservado',
-  DELIVERED = 'Entregado',
-  IN_PROGRESS = 'En desarrollo',
-  FINISHED = 'Evento concluido por retirar',
-  WITH_ISSUES = 'Con novedades, revisar pedido',
-  RETURNED = 'Retirado, sin novedades',
-  CANCELLED = 'Pedido anulado o cancelado'
+  QUOTE = 'QUOTE',
+  RESERVED = 'RESERVED',
+  DELIVERED = 'DELIVERED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  FINISHED = 'FINISHED',
+  WITH_ISSUES = 'WITH_ISSUES',
+  RETURNED = 'RETURNED',
+  CANCELLED = 'CANCELLED'
 }
 
 export enum PaymentStatus {
@@ -122,8 +121,8 @@ export interface EventOrder {
   clientName: string;
   title: string;
   orderDate: string;
-  executionDate: string; // Fecha de inicio principal
-  executionDates?: string[]; // Array con todas las fechas del evento
+  executionDate: string; 
+  executionDates?: string[]; 
   status: EventStatus;
   cancelReason?: string;
   paymentStatus: PaymentStatus;
@@ -141,8 +140,8 @@ export interface EventOrder {
   invoiceNumber?: string;
   taxAmount?: number;
   rentalDays?: number;
-  discountPercentage?: number; // Valor del descuento (usado para porcentaje o valor fijo)
-  discountType?: 'PERCENT' | 'VALUE'; // Tipo de descuento seleccionado
+  discountPercentage?: number; 
+  discountType?: 'PERCENT' | 'VALUE'; 
   warehouseExitId?: string;
   originQuoteNumber?: number;
   dispatchedBy?: string;
@@ -197,21 +196,21 @@ export interface Withholding {
   type: 'IVA' | 'RENTA';
   percentage: number;
   amount: number;
-  relatedDocNumber: string; // Factura del cliente
-  relatedOrderId?: string;  // ID del pedido afectado
-  beneficiary: string;      // Nombre del cliente
+  relatedDocNumber: string; 
+  relatedOrderId?: string;  
+  beneficiary: string;      
   clientId: string;
 }
 
 export interface PayrollEntry {
   id: string;
   date: string;
-  period: string; // Ej: "Enero 2024"
+  period: string; 
   salaries: number;
   overtime: number;
   iess: number;
   bonuses: number;
-  extraPay: number; // Sobre sueldos
+  extraPay: number; 
   totalDeductions: number;
   netPaid: number;
 }

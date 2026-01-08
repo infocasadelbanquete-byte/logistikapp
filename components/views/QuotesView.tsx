@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus, CompanySettings, UserRole } from '../../types';
+import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus, CompanySettings } from '../../types';
 import { storageService, DRAFT_KEYS } from '../../services/storageService';
 import { uiService } from '../../services/uiService'; 
-import { COMPANY_LOGO, COMPANY_NAME } from '../../constants';
 
 const QuotesView: React.FC = () => {
   const [quotes, setQuotes] = useState<EventOrder[]>([]);
@@ -11,7 +10,6 @@ const QuotesView: React.FC = () => {
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
   const [step, setStep] = useState(1);
-  const [currentUser, setCurrentUser] = useState<any>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -43,11 +41,9 @@ const QuotesView: React.FC = () => {
   };
 
   useEffect(() => {
-    const session = storageService.getCurrentSession();
-    setCurrentUser(session);
     const unsubEvents = storageService.subscribeToEvents((all) => {
-        // PERMANENCIA: Solo proformas en este módulo
-        setQuotes(all.filter(e => e.status === EventStatus.QUOTE));
+        // PERMANENCIA: Filtro por estado QUOTE o el string legacy
+        setQuotes(all.filter(e => e.status === EventStatus.QUOTE || (e.status as any) === 'QUOTE' || (e.status as any) === 'Proforma'));
     });
     const unsubClients = storageService.subscribeToClients(setClients);
     const unsubInventory = storageService.subscribeToInventory(setInventory);
@@ -71,26 +67,11 @@ const QuotesView: React.FC = () => {
         const invoice = state.hasInvoice || false; 
         const discValue = parseFloat(String(state.discountPercentage || 0).replace(',', '.')) || 0;
         const discType = state.discountType || 'PERCENT';
-
         let subtotal15Raw = items.reduce((acc, i) => acc + (parseAmount(i.priceAtBooking) * i.quantity * days), 0);
-        
-        let discountAmount = 0;
-        if (discType === 'PERCENT') {
-            discountAmount = subtotal15Raw * (Math.min(100, Math.max(0, discValue)) / 100);
-        } else {
-            discountAmount = Math.min(subtotal15Raw, Math.max(0, discValue));
-        }
-
+        let discountAmount = discType === 'PERCENT' ? subtotal15Raw * (Math.min(100, Math.max(0, discValue)) / 100) : Math.min(subtotal15Raw, Math.max(0, discValue));
         const netSubtotal15 = subtotal15Raw - discountAmount;
         const tax = invoice ? netSubtotal15 * 0.15 : 0; 
-        
-        return { 
-          ...state, 
-          rentalDays: days,
-          executionDate: selectedDates[0],
-          total: netSubtotal15 + tax + delivery, 
-          taxAmount: tax 
-        };
+        return { ...state, rentalDays: days, executionDate: selectedDates[0], total: netSubtotal15 + tax + delivery, taxAmount: tax };
     });
   };
 
@@ -103,11 +84,7 @@ const QuotesView: React.FC = () => {
   const addDate = (date: string) => {
     if (!date) return;
     const current = [...(newQuote.executionDates || [])];
-    if (!current.includes(date)) {
-        current.push(date);
-        current.sort();
-        calculateTotal({ executionDates: current });
-    }
+    if (!current.includes(date)) { current.push(date); current.sort(); calculateTotal({ executionDates: current }); }
   };
 
   const removeDate = (date: string) => {
@@ -161,32 +138,15 @@ const QuotesView: React.FC = () => {
   };
 
   const handleConfirmQuote = async (quote: EventOrder) => {
-    const editFirst = await uiService.confirm(
-        "Confirmar Proforma", 
-        `¿Deseas editar los detalles de PRO-${quote.orderNumber} antes de confirmarla o pasarla directamente como Pedido confirmado?`, 
-        "Editar", 
-        "Confirmar Directo"
-    );
-
+    const editFirst = await uiService.confirm("Confirmar Proforma", `¿Deseas editar los detalles de PRO-${quote.orderNumber} antes de confirmarla o pasarla directamente como Pedido confirmado?`, "Editar", "Confirmar Directo");
     if (editFirst) {
-        setEditingId(quote.id);
-        setNewQuote(quote);
-        setClientSearch(quote.clientName);
-        setStep(1);
-        setViewMode('create');
+        setEditingId(quote.id); setNewQuote(quote); setClientSearch(quote.clientName); setStep(1); setViewMode('create');
     } else {
         if (await uiService.confirm("Mover a Pedidos", "¿Convertir esta proforma en un Pedido Confirmado? Esto descontará el stock del inventario.")) {
             try {
-                // Al confirmar, cambia de estado QUOTE a RESERVED y obtiene número de pedido real
-                await storageService.saveEvent({ 
-                    ...quote, 
-                    status: EventStatus.RESERVED, 
-                    orderNumber: 0 // Generará nuevo ORD-XXXX
-                }); 
-                uiService.alert("Éxito", "La proforma se ha convertido en Pedido y ha pasado al módulo correspondiente.");
-            } catch (e) {
-                uiService.alert("Error", "No se pudo realizar la confirmación.");
-            }
+                await storageService.saveEvent({ ...quote, status: EventStatus.RESERVED, orderNumber: 0 }); 
+                uiService.alert("Éxito", "La proforma se ha convertido en Pedido.");
+            } catch (e) { uiService.alert("Error", "No se pudo realizar la confirmación."); }
         }
     }
   };
@@ -342,7 +302,6 @@ const QuotesView: React.FC = () => {
                                 <span className="text-brand-300 uppercase text-[8px] md:text-[9px] font-black block mb-2 tracking-[0.3em]">Monto Estimado</span>
                                 <div className="text-4xl md:text-6xl font-black tracking-tighter">$ {Number(newQuote.total).toFixed(2)}</div>
                             </div>
-
                             <div className="mt-8 bg-white p-6 rounded-2xl shadow-soft border border-zinc-100 text-left">
                                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2 block mb-2">Descuento Especial</label>
                                 <div className="flex gap-4">
@@ -353,7 +312,6 @@ const QuotesView: React.FC = () => {
                                     </select>
                                 </div>
                             </div>
-
                             <div className="flex flex-col sm:flex-row justify-center gap-4 mt-8 md:mt-10">
                                 <button onClick={() => setStep(2)} className="h-12 md:h-14 px-10 text-zinc-400 font-black uppercase text-[9px] tracking-widest hover:text-zinc-900">Revisar Artículos</button>
                                 <button onClick={handleSave} disabled={isSaving} className="h-12 md:h-14 px-8 md:px-16 bg-emerald-600 text-white rounded-xl font-black uppercase text-[9px] shadow-premium">{isSaving ? 'Guardando...' : '💾 Generar Proforma'}</button>
@@ -373,18 +331,6 @@ const QuotesView: React.FC = () => {
                         <button onClick={handleResumeDraft} className="w-full py-3.5 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-premium">Recuperar Trabajo</button>
                         <button onClick={() => { storageService.removeDraft(DRAFT_KEYS.QUOTE); setShowDraftModal(false); }} className="w-full py-2.5 text-zinc-300 font-bold uppercase text-[8px]">Empezar de Cero</button>
                     </div>
-                </div>
-            </div>
-        )}
-        {showQuickClientModal && (
-            <div className="fixed inset-0 bg-zinc-950/40 flex items-center justify-center z-[200] backdrop-blur-md p-4 animate-fade-in">
-                <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-premium max-sm w-full animate-slide-up overflow-y-auto max-h-[90vh]">
-                    <h3 className="font-black text-brand-900 text-xl uppercase tracking-tighter mb-6">Registro Express</h3>
-                    <form onSubmit={handleQuickClientSubmit} className="space-y-4">
-                        <div><label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1 block px-2">Nombre *</label><input required className="w-full h-12 border-2 border-zinc-50 bg-zinc-50/50 rounded-xl px-4 text-xs font-bold focus:border-brand-500 outline-none shadow-inner" value={quickClientForm.name} onChange={e => setQuickClientForm({...quickClientForm, name: e.target.value})} /></div>
-                        <div><label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1 block px-2">Celular *</label><input required className="w-full h-12 border-2 border-zinc-50 bg-zinc-50/50 rounded-xl px-4 text-xs font-bold focus:border-brand-500 outline-none shadow-inner" value={quickClientForm.phone} onChange={e => setQuickClientForm({...quickClientForm, phone: e.target.value})} /></div>
-                        <div className="flex flex-col sm:flex-row gap-3 pt-4"><button type="button" onClick={() => setShowQuickClientModal(false)} className="py-2 font-black uppercase text-[9px] text-zinc-400">Volver</button><button type="submit" className="py-4 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-premium flex-1">Guardar y Seleccionar</button></div>
-                    </form>
                 </div>
             </div>
         )}
