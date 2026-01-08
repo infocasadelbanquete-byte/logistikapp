@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus, CompanySettings, UserRole } from '../../types';
 import { storageService, DRAFT_KEYS } from '../../services/storageService';
@@ -63,14 +62,16 @@ const QuotesView: React.FC = () => {
     const session = storageService.getCurrentSession();
     setCurrentUser(session);
     const unsubEvents = storageService.subscribeToEvents((all) => {
-        setQuotes(all.filter(e => e.status === EventStatus.QUOTE));
+        // Filtrar estrictamente por estado QUOTE (Proforma)
+        const proformas = all.filter(e => e.status === EventStatus.QUOTE);
+        setQuotes(proformas);
     });
     const unsubClients = storageService.subscribeToClients(setClients);
     const unsubInventory = storageService.subscribeToInventory(setInventory);
     const unsubSettings = storageService.subscribeToSettings(setSettings);
     if (storageService.hasDraft(DRAFT_KEYS.QUOTE) && viewMode === 'list') { setShowDraftModal(true); }
     return () => { unsubEvents(); unsubClients(); unsubInventory(); unsubSettings(); }
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     const hasProgress = viewMode === 'create' && !editingId && (newQuote.clientId || newQuote.items?.length || (newQuote.notes && newQuote.notes.length > 3));
@@ -162,7 +163,10 @@ const QuotesView: React.FC = () => {
     try {
         const orderNumberResult = editingId ? (newQuote.orderNumber || 0) : await storageService.generateEventNumber(true);
         const q: EventOrder = { 
-            ...newQuote as EventOrder, id: editingId || '', orderNumber: orderNumberResult, status: EventStatus.QUOTE,
+            ...newQuote as EventOrder, 
+            id: editingId || '', 
+            orderNumber: orderNumberResult, 
+            status: EventStatus.QUOTE, // Forzamos siempre QUOTE al guardar proforma
             deliveryCost: parseAmount(newQuote.deliveryCost),
             items: (newQuote.items || []).map(i => ({...i, priceAtBooking: parseAmount(i.priceAtBooking)}))
         };
@@ -176,6 +180,7 @@ const QuotesView: React.FC = () => {
   const handleConfirmQuote = async (quote: EventOrder) => {
     if (await uiService.confirm("Confirmar Pedido", `¿Convertir PRO-${quote.orderNumber} en Pedido? Se descontará stock de inventario.`)) {
         try { 
+            // Al confirmar, cambia de QUOTE a RESERVED y obtiene un nuevo número de orden de pedidos
             await storageService.saveEvent({ ...quote, status: EventStatus.RESERVED, orderNumber: 0 }); 
             uiService.alert("Éxito", "Proforma convertida en Pedido exitosamente."); 
         } catch (e) { 
@@ -184,7 +189,13 @@ const QuotesView: React.FC = () => {
     }
   };
 
-  const filteredQuotes = quotes.filter(q => (q.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(q.orderNumber).includes(searchQuery)) && (!dateFilter || q.executionDates?.includes(dateFilter) || q.executionDate === dateFilter));
+  const filteredQuotes = quotes.filter(q => {
+    const term = searchQuery.toLowerCase();
+    const matchesSearch = (q.clientName?.toLowerCase() || '').includes(term) || String(q.orderNumber).includes(term);
+    const matchesDate = !dateFilter || q.executionDates?.includes(dateFilter) || q.executionDate === dateFilter;
+    return matchesSearch && matchesDate;
+  });
+
   const canDelete = currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN;
 
   return (
@@ -223,6 +234,11 @@ const QuotesView: React.FC = () => {
                         </div>
                     </div>
                 ))}
+                {filteredQuotes.length === 0 && (
+                    <div className="col-span-full py-20 text-center opacity-20 uppercase font-black tracking-[0.5em] text-xs">
+                        Sin proformas pendientes
+                    </div>
+                )}
             </div>
         ) : (
              <div className="bg-white/70 rounded-[2rem] md:rounded-[2.5rem] shadow-premium border border-zinc-100 animate-fade-in relative flex flex-col h-[calc(100vh-140px)] min-h-[500px]">
