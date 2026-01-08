@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { uiService } from '../services/uiService';
-import { COMPANY_LOGO, COMPANY_NAME, APP_VERSION } from '../constants';
+import { COMPANY_LOGO, COMPANY_NAME } from '../constants';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -9,6 +9,14 @@ interface LayoutProps {
   onLogout: () => void;
   currentView: string;
   onNavigate: (view: string) => void;
+}
+
+// Added NavItem interface to fix role access error
+interface NavItem {
+  id: string;
+  label: string;
+  icon: string;
+  role?: UserRole;
 }
 
 const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentView, onNavigate }) => {
@@ -19,10 +27,32 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentView, 
     return uiService.subscribe(setGlobalModal);
   }, []);
 
-  const menuItems = [
-    { id: 'quotes', label: 'Proformas', icon: '📝' },
-    { id: 'events', label: 'Registro de Pedidos', icon: '📅' },
-    { id: 'dispatch', label: 'Despachos y Logística', icon: '🚚' },
+  // Explicitly typing sections to use NavItem
+  const sections: { title: string; items: NavItem[] }[] = [
+    {
+      title: 'Operaciones',
+      items: [
+        { id: 'quotes', label: 'Proformas', icon: '📝' },
+        { id: 'events', label: 'Registro Pedidos', icon: '📅' },
+        { id: 'dispatch', label: 'Despachos', icon: '🚚' },
+      ]
+    },
+    {
+      title: 'Gestión',
+      items: [
+        { id: 'inventory', label: 'Inventario', icon: '🪑' },
+        { id: 'clients', label: 'Clientes', icon: '👥' },
+        { id: 'payments', label: 'Pagos/Caja', icon: '💰' },
+      ]
+    },
+    {
+      title: 'Administración',
+      items: [
+        { id: 'reports', label: 'Reportes', icon: '📈', role: UserRole.SUPER_ADMIN },
+        { id: 'users', label: 'Usuarios', icon: '🔐', role: UserRole.SUPER_ADMIN },
+        { id: 'settings', label: 'Configuración', icon: '⚙️', role: UserRole.SUPER_ADMIN },
+      ]
+    }
   ];
 
   return (
@@ -34,18 +64,27 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentView, 
           </div>
           <h2 className="text-brand-900 text-[10px] font-black uppercase leading-none tracking-tighter">{COMPANY_NAME}</h2>
         </div>
-        <nav className="flex-1 px-4 space-y-1">
-          {menuItems.map((item) => (
-            <button 
-              key={item.id}
-              onClick={() => { onNavigate(item.id); setIsSidebarOpen(false); }} 
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === item.id ? 'bg-brand-900 text-white shadow-lg' : 'text-zinc-400 hover:bg-zinc-50'}`}
-            >
-              <span className="text-lg">{item.icon}</span>
-              <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
-            </button>
+        
+        <nav className="flex-1 px-4 space-y-6 overflow-y-auto scrollbar-hide">
+          {sections.map((section, idx) => (
+            <div key={idx}>
+              <p className="px-4 text-[8px] font-black text-zinc-300 uppercase tracking-[0.3em] mb-2">{section.title}</p>
+              <div className="space-y-1">
+                {section.items.filter(item => !item.role || user.role === item.role).map((item) => (
+                  <button 
+                    key={item.id}
+                    onClick={() => { onNavigate(item.id); setIsSidebarOpen(false); }} 
+                    className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all ${currentView === item.id ? 'bg-brand-900 text-white shadow-lg' : 'text-zinc-400 hover:bg-zinc-50'}`}
+                  >
+                    <span className="text-base">{item.icon}</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
+        
         <div className="p-6 border-t border-zinc-50">
            <button onClick={onLogout} className="w-full py-3 bg-zinc-50 text-zinc-400 rounded-xl text-[9px] font-black uppercase border border-zinc-100">Cerrar Sesión</button>
         </div>
@@ -54,9 +93,9 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentView, 
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         <header className="no-print h-16 bg-white/80 backdrop-blur-md border-b border-zinc-100 flex items-center justify-between px-6">
           <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-zinc-400">☰</button>
-          <h1 className="text-[10px] font-black uppercase text-brand-900 tracking-widest">
-            {menuItems.find(m => m.id === currentView)?.label || 'Sistema Logistik'}
-          </h1>
+          <div className="flex items-center gap-4">
+             <h1 className="text-[10px] font-black uppercase text-brand-900 tracking-widest">Sistema Logistik</h1>
+          </div>
           <div className="w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center text-[10px] font-black text-brand-900 border border-brand-100">
             {user.name.charAt(0)}
           </div>

@@ -14,7 +14,7 @@ export interface User {
   role: UserRole;
   status?: UserStatus;
   lastActive?: string;
-  // Added security fields
+  // Added properties for security and locking
   isLocked?: boolean;
   failedLoginAttempts?: number;
 }
@@ -31,8 +31,12 @@ export interface Client {
 }
 
 export type InventoryType = 'PRODUCT' | 'SERVICE';
-// Added PresentationType for inventory management
-export type PresentationType = 'UNIT' | 'BOX';
+
+// Added PresentationType enum
+export enum PresentationType {
+  UNIT = 'UNIT',
+  BOX = 'BOX'
+}
 
 export interface InventoryItem {
   id: string;
@@ -45,12 +49,9 @@ export interface InventoryItem {
   type: InventoryType;
   images: string[];
   code?: string;
-  // Added extended inventory fields
-  brand?: string;
-  model?: string;
-  presentationType?: PresentationType;
+  // Added properties for inventory management
+  presentationType?: PresentationType | 'UNIT' | 'BOX';
   quantityPerBox?: number;
-  extraNotes?: string;
 }
 
 export enum EventStatus {
@@ -61,8 +62,8 @@ export enum EventStatus {
   PARTIAL_RETURN = 'RETIRO PARCIAL',
   FINISHED = 'FINALIZADO',
   CANCELLED = 'CANCELLED',
-  // Added RETURNED status for backward compatibility or specific flows
-  RETURNED = 'RETURNED'
+  // Added RETURNED as used in ClientView.tsx
+  RETURNED = 'RETORNADO'
 }
 
 export enum PaymentStatus {
@@ -86,10 +87,10 @@ export interface PaymentTransaction {
   method: PaymentMethod;
   recordedBy: string;
   orderNumber: number;
-  // Added transaction metadata
-  bankName?: string;
+  // Added properties for payment management
   isVoid?: boolean;
   voidReason?: string;
+  bankName?: string;
 }
 
 export interface EventOrder {
@@ -113,14 +114,20 @@ export interface EventOrder {
   discountType?: 'PERCENT' | 'VALUE';
   notes?: string;
   returnNotes?: string;
-  // Added missing order properties
   transactions?: PaymentTransaction[];
+  // Added properties for accounting and invoicing
   withheldAmount?: number;
   invoiceGenerated?: boolean;
   invoiceNumber?: string;
 }
 
-// Added missing global types used across services
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+}
+
+// Added missing interfaces used in storageService and other views
+
 export interface AppNotification {
   id: string;
   message: string;
@@ -135,12 +142,6 @@ export interface CompanySettings {
   logoUrl: string;
 }
 
-export enum PurchaseDocType {
-  INVOICE = 'FACTURA',
-  RECEIPT = 'RECIBO',
-  RISE = 'RISE'
-}
-
 export interface Provider {
   id: string;
   name: string;
@@ -148,6 +149,12 @@ export interface Provider {
   phone?: string;
   mobile?: string;
   email?: string;
+}
+
+export enum PurchaseDocType {
+  INVOICE = 'FACTURA',
+  RECEIPT = 'NOTA DE VENTA',
+  LIQUIDATION = 'LIQUIDACION DE COMPRA'
 }
 
 export interface PurchaseTransaction {
@@ -183,8 +190,8 @@ export interface Withholding {
   amount: number;
   clientId: string;
   beneficiary: string;
-  relatedOrderId?: string;
-  relatedDocNumber?: string;
+  relatedOrderId: string;
+  relatedDocNumber: string;
 }
 
 export interface PayrollEntry {
@@ -198,9 +205,4 @@ export interface PayrollEntry {
   extraPay: number;
   totalDeductions: number;
   netPaid: number;
-}
-
-export interface AuthState {
-  user: User | null;
-  isAuthenticated: boolean;
 }
