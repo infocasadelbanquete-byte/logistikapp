@@ -78,7 +78,10 @@ const EventsView: React.FC = () => {
   const handlePrintOrder = async (order: EventOrder) => {
     const settings = await storageService.getSettings();
     const win = window.open('', '_blank');
-    if (!win) return;
+    if (!win) {
+      await uiService.alert("Navegador Bloqueado", "Por favor permita las ventanas emergentes (pop-ups) para ver el documento.");
+      return;
+    }
 
     const itemsRows = order.items.map(oi => {
       const inv = inventory.find(i => i.id === oi.itemId);
@@ -96,15 +99,16 @@ const EventsView: React.FC = () => {
 
     const fin = {
         subtotal: order.items.reduce((acc, i) => acc + (i.priceAtBooking * i.quantity), 0) * (order.rentalDays || 1),
-        iva: order.hasInvoice ? (order.total - (order.deliveryCost || 0)) * (0.15/1.15) : 0, // Cálculo aproximado para reporte
     };
 
     win.document.write(`
+      <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8">
           <title>${order.status === EventStatus.QUOTE ? 'Proforma' : 'Pedido'} #${order.orderNumber}</title>
           <style>
-            body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 20px; color: #333; }
+            body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 20px; color: #333; margin: 0; }
             .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4c0519; padding-bottom: 15px; }
             .logo { height: 60px; }
             .title { text-align: right; }
@@ -116,6 +120,7 @@ const EventsView: React.FC = () => {
             .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
             .grand-total { border-top: 2px solid #4c0519; margin-top: 10px; padding-top: 10px; font-weight: 900; font-size: 16px; color: #4c0519; }
             .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
+            @media print { .no-print { display: none; } }
           </style>
         </head>
         <body>
@@ -160,7 +165,14 @@ const EventsView: React.FC = () => {
             Generado por Logistik Pro • ${settings?.name || COMPANY_NAME}<br/>
             Este documento no constituye una factura legal.
           </div>
-          <script>window.onload=function(){window.print(); setTimeout(()=>window.close(), 500);}</script>
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+                window.onafterprint = function() { window.close(); };
+              }, 500);
+            };
+          </script>
         </body>
       </html>
     `);
@@ -266,7 +278,7 @@ const EventsView: React.FC = () => {
                   {o.status === EventStatus.CONFIRMED && <button onClick={() => handleSendToDispatch(o)} className="w-full py-1.5 bg-brand-900 text-white rounded-lg text-[8px] font-black uppercase">🚚 Despachar</button>}
                   <div className="flex gap-1">
                       <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-50 text-zinc-600 rounded-lg text-[8px] font-black uppercase">Editar</button>
-                      <button onClick={() => { if(confirm("¿Anular?")) storageService.saveEvent({...o, status: EventStatus.CANCELLED}) }} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
+                      <button onClick={async () => { if(await uiService.confirm("Anular Registro", "¿Está seguro que desea anular este registro?")) storageService.saveEvent({...o, status: EventStatus.CANCELLED}) }} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
                   </div>
                 </div>
               </div>
@@ -379,7 +391,7 @@ const EventsView: React.FC = () => {
                           <input autoFocus type="text" className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none" value={expressClientData.name} onChange={e => setExpressClientData({...expressClientData, name: e.target.value})} />
                       </div>
                       <div className="flex gap-2 pt-4">
-                          <button onClick={() => setIsExpressModalOpen(false)} className="flex-1 py-3 text-zinc-400 font-black uppercase text-[8px]">Cancelar</button>
+                          <button onClick={() => setIsExpressModalOpen(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[9px]">Cancelar</button>
                           <button onClick={handleSaveExpressClient} className="flex-[2] py-4 bg-brand-900 text-white rounded-xl font-black uppercase text-[8px] tracking-widest shadow-lg">Guardar y Usar</button>
                       </div>
                   </div>
