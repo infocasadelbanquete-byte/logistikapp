@@ -1,4 +1,3 @@
-
 import { User, Client, InventoryItem, EventOrder, UserRole, PaymentTransaction, Withholding, PayrollEntry, PurchaseTransaction, EventStatus } from '../types';
 import { db, isConfigured } from './firebase';
 import { 
@@ -50,6 +49,10 @@ export const storageService = {
       const docRef = await addDoc(collection(db, COLLECTIONS.EVENTS), payload);
       return docRef.id;
     }
+  },
+
+  deleteEvent: async (id: string) => {
+    await deleteDoc(doc(db, COLLECTIONS.EVENTS, id));
   },
 
   generateOrderNumber: async () => {

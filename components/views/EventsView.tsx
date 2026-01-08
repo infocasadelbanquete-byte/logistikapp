@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus, Client, InventoryItem, PaymentMethod, PaymentStatus } from '../../types';
+import { EventOrder, EventStatus, Client, InventoryItem, PaymentMethod, PaymentStatus, UserRole } from '../../types';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
 import { COMPANY_LOGO, COMPANY_NAME } from '../../constants';
+
+const DRAFT_KEY = 'logistik_order_draft';
 
 const EventsView: React.FC = () => {
   const [view, setView] = useState<'LIST' | 'FORM'>('LIST');
@@ -11,11 +13,16 @@ const EventsView: React.FC = () => {
   const [orders, setOrders] = useState<EventOrder[]>([]);
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showClientModal, setShowClientModal] = useState(false);
+  const [catalogQuantities, setCatalogQuantities] = useState<{ [key: string]: number }>({});
+  const [userRole, setUserRole] = useState<UserRole>(UserRole.STAFF);
   
   // Form State
   const [orderData, setOrderData] = useState<any>({
     clientId: '',
     executionDate: new Date().toISOString().split('T')[0],
+    rentalDays: 1,
     requiresDelivery: false,
     deliveryCost: 0,
     hasInvoice: false,
@@ -28,42 +35,103 @@ const EventsView: React.FC = () => {
     checkNumber: ''
   });
 
+  const [newClient, setNewClient] = useState<Partial<Client>>({ name: '', documentId: '', phone: '', address: '' });
+
   useEffect(() => {
     storageService.subscribeToClients(setClients);
     storageService.subscribeToInventory(setInventory);
     storageService.subscribeToEvents(setOrders);
+    const session = storageService.getCurrentSession();
+    if (session) setUserRole(session.role);
+
+    // Cargar borrador si existe
+    const savedDraft = localStorage.getItem(DRAFT_KEY);
+    if (savedDraft) {
+      const { data, items } = JSON.parse(savedDraft);
+      setOrderData(data);
+      setSelectedItems(items);
+      setView('FORM');
+    }
   }, []);
 
+  // Persistir borrador automáticamente
+  useEffect(() => {
+    if (view === 'FORM' && !editingId && (orderData.clientId || selectedItems.length > 0)) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ data: orderData, items: selectedItems }));
+    }
+  }, [orderData, selectedItems, view, editingId]);
+
+  const handleDecimalInput = (val: string, field: string) => {
+    const sanitized = val.replace(',', '.');
+    if (sanitized === '' || /^\d*\.?\d*$/.test(sanitized)) {
+      setOrderData({ ...orderData, [field]: sanitized });
+    }
+  };
+
+  const calculateSubtotalItems = () => {
+    return selectedItems.reduce((acc, i) => acc + (i.price * i.quantity), 0) * (orderData.rentalDays || 1);
+  };
+
+  const calculateDiscountableBase = () => {
+    return selectedItems
+      .filter(i => !i.name.toLowerCase().includes('salonero'))
+      .reduce((acc, i) => acc + (i.price * i.quantity), 0) * (orderData.rentalDays || 1);
+  };
+
+  const calculateDiscountValue = () => {
+    const base = calculateDiscountableBase();
+    const dVal = parseFloat(String(orderData.discountValue)) || 0;
+    if (orderData.discountType === 'PERCENT') {
+      return base * (dVal / 100);
+    }
+    return dVal;
+  };
+
   const calculateTotal = () => {
-    const itemsSubtotal = selectedItems.reduce((acc, i) => acc + (i.price * i.quantity), 0);
-    const discount = orderData.discountType === 'PERCENT' ? (itemsSubtotal * (orderData.discountValue / 100)) : orderData.discountValue;
+    const itemsSubtotal = calculateSubtotalItems();
+    const discount = calculateDiscountValue();
     const subtotalAfterDiscount = itemsSubtotal - discount;
     const iva = orderData.hasInvoice ? (subtotalAfterDiscount * 0.15) : 0;
-    return subtotalAfterDiscount + iva + (orderData.deliveryCost || 0);
+    const delivery = parseFloat(String(orderData.deliveryCost)) || 0;
+    return subtotalAfterDiscount + iva + delivery;
   };
 
   const handleSave = async () => {
     if (!orderData.clientId || selectedItems.length === 0) return uiService.alert("Faltan Datos", "Seleccione cliente y productos.");
     
+    if (userRole === UserRole.STAFF) {
+      const base = calculateDiscountableBase();
+      const dVal = parseFloat(String(orderData.discountValue)) || 0;
+      if (orderData.discountType === 'PERCENT' && dVal > 10) {
+        return uiService.alert("Acceso Restringido", "Como STAFF, el descuento máximo permitido es 10%.");
+      }
+      if (orderData.discountType === 'VALUE' && dVal > (base * 0.10)) {
+        return uiService.alert("Acceso Restringido", `Como STAFF, el descuento máximo permitido es $${(base * 0.10).toFixed(2)} (10% del subtotal descontable).`);
+      }
+    }
+
     setLoading(true);
     const total = calculateTotal();
-    const orderNumber = await storageService.generateOrderNumber();
+    const orderNumber = editingId ? orders.find(o => o.id === editingId)?.orderNumber || 0 : await storageService.generateOrderNumber();
     
     const order: EventOrder = {
-      id: '',
+      id: editingId || '',
       orderNumber,
       clientId: orderData.clientId,
       clientName: clients.find(c => c.id === orderData.clientId)?.name || 'Consumidor Final',
       orderDate: new Date().toISOString(),
       executionDate: orderData.executionDate,
+      rentalDays: orderData.rentalDays,
       status: EventStatus.CONFIRMED,
       paymentStatus: orderData.paymentAmount >= total ? PaymentStatus.PAID : (orderData.paymentAmount > 0 ? PaymentStatus.PARTIAL : PaymentStatus.CREDIT),
       paidAmount: orderData.paymentAmount,
       total,
       items: selectedItems.map(i => ({ itemId: i.id, quantity: i.quantity, priceAtBooking: i.price })),
       requiresDelivery: orderData.requiresDelivery,
-      deliveryCost: orderData.deliveryCost,
+      deliveryCost: parseFloat(String(orderData.deliveryCost)) || 0,
       hasInvoice: orderData.hasInvoice,
+      discountValue: parseFloat(String(orderData.discountValue)) || 0,
+      discountType: orderData.discountType,
       notes: orderData.notes,
       transactions: orderData.paymentAmount > 0 ? [{
         id: Date.now().toString(),
@@ -77,28 +145,88 @@ const EventsView: React.FC = () => {
       }] : []
     };
 
-    const orderId = await storageService.saveEvent(order);
+    await storageService.saveEvent(order);
     
-    // Descontar Stock
-    for (const item of selectedItems) {
-      if (item.type === 'PRODUCT') await storageService.updateStock(item.id, -item.quantity);
+    if (!editingId) {
+        for (const item of selectedItems) {
+          if (item.type === 'PRODUCT') await storageService.updateStock(item.id, -item.quantity);
+        }
     }
 
+    localStorage.removeItem(DRAFT_KEY); // Limpiar borrador tras éxito
     setLoading(false);
-    uiService.alert("Venta Exitosa", `Pedido #${orderNumber} registrado.`);
+    uiService.alert("Éxito", `Pedido #${orderNumber} registrado.`);
+    resetForm();
+  };
+
+  const resetForm = () => {
     setView('LIST');
+    setEditingId(null);
     setSelectedItems([]);
+    setCatalogQuantities({});
+    localStorage.removeItem(DRAFT_KEY);
+    setOrderData({
+        clientId: '',
+        executionDate: new Date().toISOString().split('T')[0],
+        rentalDays: 1,
+        requiresDelivery: false,
+        deliveryCost: 0,
+        hasInvoice: false,
+        discountValue: 0,
+        discountType: 'VALUE',
+        notes: '',
+        paymentAmount: 0,
+        paymentMethod: PaymentMethod.CASH,
+        bankName: '',
+        checkNumber: ''
+    });
+  };
+
+  const handleEdit = (o: EventOrder) => {
+    localStorage.removeItem(DRAFT_KEY); // Evitar conflictos con borrador previo
+    setEditingId(o.id);
+    const itemsWithData = o.items.map(oi => {
+        const inv = inventory.find(i => i.id === oi.itemId);
+        return { ...inv, quantity: oi.quantity, price: oi.priceAtBooking };
+    });
+    setSelectedItems(itemsWithData);
+    setOrderData({
+        ...o,
+        paymentAmount: o.paidAmount
+    });
+    setView('FORM');
+  };
+
+  const handleCancel = async (o: EventOrder) => {
+    if (await uiService.confirm("Anular Pedido", `¿Está seguro de anular el pedido #${o.orderNumber}?`)) {
+        await storageService.saveEvent({ ...o, status: EventStatus.CANCELLED });
+        for (const item of o.items) {
+            await storageService.updateStock(item.itemId, item.quantity);
+        }
+        uiService.alert("Anulado", "Pedido cancelado.");
+    }
+  };
+
+  const handleSaveQuickClient = async () => {
+      if (!newClient.name) return uiService.alert("Error", "Nombre obligatorio");
+      const id = Date.now().toString();
+      await storageService.saveClient({ ...newClient, id } as Client);
+      setOrderData({ ...orderData, clientId: id });
+      setShowClientModal(false);
+      setNewClient({ name: '', documentId: '', phone: '', address: '' });
   };
 
   const handlePrint = (o: EventOrder) => {
     const win = window.open('', '_blank');
     if (!win) return;
     const client = clients.find(c => c.id === o.clientId);
-    const orderItems = o.items.map(oi => {
+    const rows = o.items.map(oi => {
       const it = inventory.find(inv => inv.id === oi.itemId);
-      return `<tr><td>${it?.name}</td><td>${oi.quantity}</td><td>$ ${oi.priceAtBooking.toFixed(2)}</td><td>$ ${(oi.quantity * oi.priceAtBooking).toFixed(2)}</td></tr>`;
-    }).join('');
-
+      return `<tr><td>${it?.name}</td><td>${oi.quantity}</td><td>$ ${oi.priceAtBooking.toFixed(2)}</td><td>$ ${(oi.quantity * oi.priceAtBooking * (o.rentalDays || 1)).toFixed(2)}</td></tr>`;
+    });
+    if (o.deliveryCost && o.deliveryCost > 0) {
+      rows.push(`<tr><td>Transporte y montaje</td><td>1</td><td>$ ${o.deliveryCost.toFixed(2)}</td><td>$ ${o.deliveryCost.toFixed(2)}</td></tr>`);
+    }
     win.document.write(`
       <html><head><style>
         body { font-family: sans-serif; font-size: 10px; margin: 1cm; color: #111; }
@@ -121,18 +249,16 @@ const EventsView: React.FC = () => {
         <div style="background:#f9f9f9; padding:15px; border-radius:10px;">
           <p><strong>CLIENTE:</strong> ${o.clientName.toUpperCase()}</p>
           <p><strong>CÉDULA/RUC:</strong> ${client?.documentId || 'N/A'}</p>
-          <p><strong>FECHA EVENTO:</strong> ${o.executionDate}</p>
+          <p><strong>FECHA EVENTO:</strong> ${o.executionDate} (${o.rentalDays || 1} días)</p>
           <p><strong>DIRECCIÓN:</strong> ${o.deliveryAddress || client?.address || 'N/A'}</p>
         </div>
         <table>
           <thead><tr><th>Descripción</th><th>Cant</th><th>V. Unit</th><th>Subtotal</th></tr></thead>
-          <tbody>${orderItems}</tbody>
+          <tbody>${rows.join('')}</tbody>
         </table>
         <div class="totals">
-          <div style="display:flex; justify-content:space-between;"><span>Venta Bruta:</span><span>$ ${o.total.toFixed(2)}</span></div>
-          <div style="display:flex; justify-content:space-between; font-size:14px; font-weight:900; margin-top:10px; border-top:1px solid #4c0519; padding-top:5px;"><span>TOTAL:</span><span>$ ${o.total.toFixed(2)}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span>Total Neto:</span><span>$ ${o.total.toFixed(2)}</span></div>
         </div>
-        <div style="clear:both;"></div>
         <div class="signature">
           <div class="sig-line">ENTREGADO POR</div>
           <div class="sig-line">RECIBIDO CONFORME (CLIENTE)</div>
@@ -143,144 +269,175 @@ const EventsView: React.FC = () => {
     win.document.close();
   };
 
+  const handleUpdateItemQuantity = (itemId: string, qty: string) => {
+    const val = parseInt(qty) || 1;
+    setCatalogQuantities(prev => ({ ...prev, [itemId]: val }));
+  };
+
+  const addItemToOrder = (item: InventoryItem) => {
+    const qtyToAdd = catalogQuantities[item.id] || 1;
+    const existing = selectedItems.find(i => i.id === item.id);
+    if (existing) {
+      setSelectedItems(selectedItems.map(i => i.id === item.id ? { ...i, quantity: i.quantity + qtyToAdd } : i));
+    } else {
+      setSelectedItems([...selectedItems, { ...item, quantity: qtyToAdd }]);
+    }
+    setCatalogQuantities(prev => ({ ...prev, [item.id]: 1 }));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-3xl font-black text-brand-950 uppercase tracking-tighter">Venta Directa</h2>
-          <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest mt-1">Registro de nuevos pedidos con afectación inmediata</p>
+          <h2 className="text-2xl font-black text-brand-950 uppercase tracking-tighter">Venta Directa</h2>
+          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Control de pedidos operativos</p>
         </div>
-        <button onClick={() => setView(view === 'LIST' ? 'FORM' : 'LIST')} className="px-8 h-12 bg-brand-900 text-white rounded-xl font-black uppercase text-[10px] shadow-lg active:scale-95 transition-all">
-          {view === 'LIST' ? '+ Nuevo Registro' : 'Volver al Listado'}
+        <button onClick={() => setView(view === 'LIST' ? 'FORM' : 'LIST')} className="px-6 h-10 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">
+          {view === 'LIST' ? '+ Nuevo Pedido' : 'Volver'}
         </button>
       </div>
 
       {view === 'LIST' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
-          {orders.map(o => (
-            <div key={o.id} className="bg-white p-6 rounded-[2rem] shadow-premium border border-zinc-100 flex flex-col hover:border-brand-100 transition-all group">
-              <div className="flex justify-between mb-4">
-                <span className="text-[10px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
-                <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase ${o.paymentStatus === PaymentStatus.PAID ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{o.paymentStatus}</span>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pb-20">
+          {orders.filter(o => o.status !== EventStatus.QUOTE).map(o => (
+            <div key={o.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col hover:border-brand-100 transition-all group relative">
+              <div className="flex justify-between mb-1">
+                <span className="text-[7px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase ${o.status === EventStatus.CANCELLED ? 'bg-zinc-100 text-zinc-400' : 'bg-emerald-50 text-emerald-600'}`}>{o.status}</span>
               </div>
-              <h3 className="text-sm font-black text-zinc-950 uppercase truncate mb-1">{o.clientName}</h3>
-              <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-6">🗓️ {o.executionDate}</p>
-              <div className="mt-auto flex gap-2">
-                <button onClick={() => handlePrint(o)} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg font-black uppercase text-[9px] shadow-md">🖨️ Imprimir</button>
-                <button className="w-10 h-10 flex items-center justify-center bg-zinc-50 text-zinc-400 rounded-lg">👁️</button>
+              <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate mb-0.5">{o.clientName}</h3>
+              <p className="text-[8px] font-bold text-zinc-400 uppercase mb-3">🗓️ {o.executionDate}</p>
+              <div className="mt-auto space-y-1">
+                <div className="flex gap-1">
+                    <button onClick={() => handlePrint(o)} className="flex-1 py-1 bg-zinc-900 text-white rounded text-[8px] font-black uppercase">🖨️</button>
+                    <button onClick={() => handleEdit(o)} className="w-8 h-8 flex items-center justify-center bg-zinc-50 text-blue-500 rounded text-xs">✏️</button>
+                </div>
+                {o.status !== EventStatus.CANCELLED && (
+                    <button onClick={() => handleCancel(o)} className="w-full py-0.5 text-[7px] font-black text-rose-300 hover:text-rose-600 uppercase">Anular</button>
+                )}
               </div>
             </div>
           ))}
-          {orders.length === 0 && <div className="col-span-full py-20 text-center opacity-20 font-black uppercase text-xs">Sin pedidos registrados</div>}
         </div>
       ) : (
-        <div className="bg-white rounded-[3rem] p-10 shadow-premium border border-zinc-100 animate-slide-up">
-           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-              {/* Sección Cliente y Datos */}
-              <div className="space-y-6">
-                <div className="p-8 bg-zinc-50 rounded-[2rem] border border-zinc-100 space-y-4">
-                   <h3 className="text-xs font-black text-brand-900 uppercase mb-4 tracking-widest">1. Datos del Cliente</h3>
-                   <select className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black outline-none border border-zinc-200" value={orderData.clientId} onChange={e => setOrderData({...orderData, clientId: e.target.value})}>
-                      <option value="">Seleccionar Cliente</option>
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
-                   </select>
-                   <div className="grid grid-cols-2 gap-3">
-                      <input type="date" className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.executionDate} onChange={e => setOrderData({...orderData, executionDate: e.target.value})} />
-                      <div className="flex items-center gap-2 bg-white px-4 rounded-xl border border-zinc-200 h-12">
-                         <input type="checkbox" checked={orderData.requiresDelivery} onChange={e => setOrderData({...orderData, requiresDelivery: e.target.checked})} />
-                         <span className="text-[9px] font-black uppercase">¿Transporte? (C/T)</span>
-                      </div>
+        <div className="bg-white rounded-[2rem] p-6 md:p-8 shadow-premium border border-zinc-100 animate-slide-up">
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="lg:col-span-4 space-y-4">
+                <div className="p-5 bg-zinc-50 rounded-2xl border border-zinc-100 space-y-3">
+                   <h3 className="text-[10px] font-black text-brand-900 uppercase tracking-widest">1. Configuración</h3>
+                   <div className="flex gap-2">
+                       <select className="flex-1 h-10 bg-white rounded-xl px-4 text-[10px] font-black outline-none border border-zinc-200" value={orderData.clientId} onChange={e => setOrderData({...orderData, clientId: e.target.value})}>
+                          <option value="">Cliente...</option>
+                          {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
+                       </select>
+                       <button onClick={() => setShowClientModal(true)} className="w-10 h-10 bg-brand-900 text-white rounded-xl font-black text-xl">+</button>
+                   </div>
+                   <div className="grid grid-cols-2 gap-2">
+                      <input type="date" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.executionDate} onChange={e => setOrderData({...orderData, executionDate: e.target.value})} />
+                      <input type="number" min="1" className="w-full h-10 bg-white rounded-xl px-3 text-[10px] font-black border border-zinc-200" value={orderData.rentalDays} onChange={e => setOrderData({...orderData, rentalDays: parseInt(e.target.value) || 1})} placeholder="Días" />
+                   </div>
+                   <div className="flex items-center gap-2 bg-white px-4 rounded-xl border border-zinc-200 h-10">
+                      <input type="checkbox" checked={orderData.requiresDelivery} onChange={e => setOrderData({...orderData, requiresDelivery: e.target.checked})} />
+                      <span className="text-[8px] font-black uppercase">Transporte</span>
                    </div>
                    {orderData.requiresDelivery && (
-                     <input type="number" placeholder="Costo de Transporte $" className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.deliveryCost || ''} onChange={e => setOrderData({...orderData, deliveryCost: parseFloat(e.target.value) || 0})} />
+                     <input type="text" inputMode="decimal" placeholder="Valor Transporte $" className="w-full h-10 bg-white rounded-xl px-4 text-[10px] font-black border border-zinc-200" value={orderData.deliveryCost || ''} onChange={e => handleDecimalInput(e.target.value, 'deliveryCost')} />
                    )}
                 </div>
 
-                <div className="p-8 bg-zinc-950 rounded-[2rem] space-y-4">
-                   <h3 className="text-xs font-black text-zinc-400 uppercase mb-4 tracking-widest">2. Selección de Mobiliario</h3>
-                   <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2 scrollbar-hide">
+                <div className="p-5 bg-zinc-50 border border-zinc-100 rounded-2xl space-y-3">
+                   <h3 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">2. Catálogo</h3>
+                   <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1 scrollbar-hide">
                       {inventory.map(item => (
-                        <div key={item.id} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 hover:bg-white/10 transition-colors">
-                           <div>
-                             <p className="text-[10px] font-black text-white uppercase">{item.name}</p>
-                             <p className="text-[8px] font-bold text-zinc-500 uppercase">Disp: {item.stock}</p>
+                        <div key={item.id} className="flex items-center justify-between p-2 bg-white rounded-xl border border-zinc-100">
+                           <div className="flex-1 truncate mr-2">
+                             <p className="text-[9px] font-black text-zinc-800 uppercase truncate">{item.name}</p>
+                             <p className="text-[7px] text-zinc-400 font-bold">$ {item.price.toFixed(2)}</p>
                            </div>
-                           <button onClick={() => {
-                             const existing = selectedItems.find(i => i.id === item.id);
-                             if (existing) setSelectedItems(selectedItems.map(i => i.id === item.id ? {...i, quantity: i.quantity + 1} : i));
-                             else setSelectedItems([...selectedItems, {...item, quantity: 1}]);
-                           }} className="w-8 h-8 bg-brand-900 text-white rounded-lg font-black">+</button>
+                           <div className="flex items-center gap-1.5">
+                              <input 
+                                type="number" 
+                                min="1" 
+                                className="w-10 h-8 bg-zinc-50 border border-zinc-200 rounded text-center text-[10px] font-black"
+                                value={catalogQuantities[item.id] || 1}
+                                onChange={(e) => handleUpdateItemQuantity(item.id, e.target.value)}
+                              />
+                              <button onClick={() => addItemToOrder(item)} className="w-8 h-8 bg-zinc-100 text-brand-900 rounded-lg font-black hover:bg-brand-900 hover:text-white transition-all">+</button>
+                           </div>
                         </div>
                       ))}
                    </div>
                 </div>
               </div>
 
-              {/* Sección Resumen y Pago */}
-              <div className="space-y-6">
-                 <div className="p-8 bg-white border border-zinc-200 rounded-[2rem] shadow-inner min-h-[400px] flex flex-col">
-                    <h3 className="text-xs font-black text-zinc-900 uppercase mb-6 tracking-widest">3. Resumen de Venta</h3>
-                    <div className="flex-1 space-y-3 overflow-y-auto max-h-[250px] mb-6">
+              <div className="lg:col-span-8 space-y-4">
+                 <div className="p-6 bg-white border border-zinc-200 rounded-2xl shadow-inner min-h-[400px] flex flex-col">
+                    <h3 className="text-[11px] font-black text-zinc-900 uppercase mb-4 tracking-widest border-b pb-2">3. Detalle de Cobro</h3>
+                    <div className="flex-1 space-y-1.5 overflow-y-auto max-h-[250px] mb-4 pr-2">
                        {selectedItems.map(i => (
-                         <div key={i.id} className="flex justify-between items-center text-[10px] font-bold">
-                            <span className="uppercase text-zinc-400"><span className="text-zinc-900 font-black">{i.quantity}x</span> {i.name}</span>
-                            <span>$ {(i.price * i.quantity).toFixed(2)}</span>
+                         <div key={i.id} className="flex justify-between items-center text-[10px] bg-zinc-50/50 p-2 rounded-lg group">
+                            <span className="uppercase font-bold text-zinc-500"><span className="text-zinc-950 font-black">{i.quantity}x</span> {i.name}</span>
+                            <div className="flex items-center gap-4">
+                                <span className="font-black">$ {(i.price * i.quantity * (orderData.rentalDays || 1)).toFixed(2)}</span>
+                                <button onClick={() => setSelectedItems(selectedItems.filter(si => si.id !== i.id))} className="text-rose-300 opacity-0 group-hover:opacity-100">✕</button>
+                            </div>
                          </div>
                        ))}
-                       {selectedItems.length === 0 && <p className="text-center py-10 opacity-30 text-[9px] font-black uppercase">Cesta vacía</p>}
                     </div>
                     
-                    <div className="border-t pt-4 space-y-2">
-                       <div className="flex justify-between text-[9px] font-black text-zinc-400 uppercase"><span>Subtotal Mobiliario</span><span>$ {selectedItems.reduce((acc, i) => acc + (i.price * i.quantity), 0).toFixed(2)}</span></div>
-                       <div className="flex items-center justify-between gap-4">
-                          <label className="flex items-center gap-2 cursor-pointer">
+                    <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                       <div className="space-y-2">
+                          <div className="flex items-center gap-2">
                              <input type="checkbox" checked={orderData.hasInvoice} onChange={e => setOrderData({...orderData, hasInvoice: e.target.checked})} />
-                             <span className="text-[9px] font-black uppercase">Aplicar IVA (15%)</span>
-                          </label>
-                          {orderData.hasInvoice && <span className="text-[9px] font-black">$ {(selectedItems.reduce((acc, i) => acc + (i.price * i.quantity), 0) * 0.15).toFixed(2)}</span>}
+                             <span className="text-[9px] font-black uppercase text-zinc-500">Factura (IVA 15%)</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                             <div className="space-y-1">
+                                 <label className="text-[7px] font-black text-zinc-400 uppercase">Descuento</label>
+                                 <input type="text" inputMode="decimal" className="w-full h-8 bg-zinc-50 rounded px-2 text-[10px] font-black border-none" value={orderData.discountValue} onChange={e => handleDecimalInput(e.target.value, 'discountValue')} />
+                             </div>
+                             <div className="space-y-1">
+                                 <label className="text-[7px] font-black text-zinc-400 uppercase">Tipo</label>
+                                 <select className="w-full h-8 bg-zinc-50 rounded px-1 text-[9px] font-black border-none" value={orderData.discountType} onChange={e => setOrderData({...orderData, discountType: e.target.value})}>
+                                    <option value="VALUE">$ Valor</option>
+                                    <option value="PERCENT">% Porc</option>
+                                 </select>
+                             </div>
+                          </div>
                        </div>
-                       <div className="pt-4 border-t-2 border-brand-900 flex justify-between items-center">
-                          <span className="text-[10px] font-black text-brand-900 uppercase tracking-widest">Total a Pagar</span>
-                          <span className="text-2xl font-black text-brand-950">$ {calculateTotal().toFixed(2)}</span>
+                       
+                       <div className="bg-brand-50/50 p-4 rounded-xl flex flex-col justify-center border border-brand-100 text-right">
+                          <p className="text-[8px] font-black text-zinc-400 uppercase">Subtotal: $ {calculateSubtotalItems().toFixed(2)}</p>
+                          <p className="text-[8px] font-black text-rose-500 uppercase">Desc: - $ {calculateDiscountValue().toFixed(2)}</p>
+                          <p className="text-2xl font-black text-brand-950 tracking-tighter mt-1">$ {calculateTotal().toFixed(2)}</p>
                        </div>
                     </div>
                  </div>
 
-                 <div className="p-8 bg-emerald-50 rounded-[2rem] border border-emerald-100 space-y-4">
-                    <h3 className="text-xs font-black text-emerald-900 uppercase tracking-widest">4. Pago / Abono Inicial</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                       <div className="space-y-1">
-                          <label className="text-[8px] font-black text-emerald-600 uppercase ml-2">Monto Abono</label>
-                          <input type="number" className="w-full h-12 bg-white rounded-xl px-4 text-sm font-black text-emerald-950 shadow-sm border-none" value={orderData.paymentAmount || ''} onChange={e => setOrderData({...orderData, paymentAmount: parseFloat(e.target.value) || 0})} />
-                       </div>
-                       <div className="space-y-1">
-                          <label className="text-[8px] font-black text-emerald-600 uppercase ml-2">Método</label>
-                          <select className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black shadow-sm border-none" value={orderData.paymentMethod} onChange={e => setOrderData({...orderData, paymentMethod: e.target.value})}>
-                             <option value={PaymentMethod.CASH}>Efectivo</option>
-                             <option value={PaymentMethod.TRANSFER}>Transferencia</option>
-                             <option value={PaymentMethod.DEPOSIT}>Depósito</option>
-                             <option value={PaymentMethod.CHECK}>Cheque</option>
-                          </select>
-                       </div>
-                    </div>
-                    {(orderData.paymentMethod === PaymentMethod.TRANSFER || orderData.paymentMethod === PaymentMethod.DEPOSIT) && (
-                      <select className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black shadow-sm border-none" value={orderData.bankName} onChange={e => setOrderData({...orderData, bankName: e.target.value})}>
-                        <option value="">-- Banco --</option>
-                        <option value="Banco del Austro">Banco del Austro</option>
-                        <option value="Banco Guayaquil">Banco Guayaquil</option>
-                      </select>
-                    )}
-                    {orderData.paymentMethod === PaymentMethod.CHECK && (
-                      <input type="text" placeholder="Nº Cheque y Banco" className="w-full h-12 bg-white rounded-xl px-4 text-[10px] font-black shadow-sm border-none" value={orderData.checkNumber} onChange={e => setOrderData({...orderData, checkNumber: e.target.value})} />
-                    )}
-                 </div>
-
-                 <button onClick={handleSave} disabled={loading} className="w-full h-20 bg-brand-900 text-white rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl active:scale-95 transition-all disabled:opacity-50">
-                    {loading ? 'Procesando Venta...' : 'Finalizar y Guardar Venta'}
+                 <button onClick={handleSave} disabled={loading} className="w-full h-14 bg-brand-900 text-white rounded-2xl font-black uppercase text-[10px] shadow-2xl active:scale-95 transition-all">
+                    {loading ? 'Sincronizando...' : 'Finalizar Pedido'}
                  </button>
               </div>
            </div>
         </div>
+      )}
+
+      {showClientModal && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[200]">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-premium border border-white">
+                  <h3 className="text-lg font-black text-brand-900 uppercase mb-4 tracking-tighter">Nuevo Cliente</h3>
+                  <div className="space-y-3">
+                      <input placeholder="Razón Social" className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} />
+                      <input placeholder="RUC / Cédula" className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={newClient.documentId} onChange={e => setNewClient({...newClient, documentId: e.target.value})} />
+                      <input placeholder="Teléfono" className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={newClient.phone} onChange={e => setNewClient({...newClient, phone: e.target.value})} />
+                      <input placeholder="Dirección" className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={newClient.address} onChange={e => setNewClient({...newClient, address: e.target.value})} />
+                      <div className="flex gap-2 pt-2">
+                          <button onClick={() => setShowClientModal(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[9px]">Atrás</button>
+                          <button onClick={handleSaveQuickClient} className="flex-2 px-6 py-3 bg-zinc-900 text-white rounded-xl font-black uppercase text-[9px]">Guardar</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

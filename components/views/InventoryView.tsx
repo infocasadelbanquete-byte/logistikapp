@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { InventoryItem, UserRole, PresentationType } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -24,7 +23,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
 
   const [formData, setFormData] = useState<any>(initialFormState);
   const canDelete = role === UserRole.SUPER_ADMIN || role === UserRole.ADMIN;
-  const isSuperAdmin = role === UserRole.SUPER_ADMIN;
 
   useEffect(() => {
     const unsub = storageService.subscribeToInventory(setItems);
@@ -63,113 +61,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
     setIsModalOpen(true);
   };
 
-  const handlePrintInventory = async () => {
-    const settings = await storageService.getSettings();
-    const logo = settings?.logoUrl || COMPANY_LOGO;
-    const name = settings?.name || COMPANY_NAME;
-    const currentUser = storageService.getCurrentSession();
-
-    const rows = filteredItems.map((item, index) => `
-      <tr>
-        <td style="border: 1px solid #000; padding: 6px; text-align: center;">${index + 1}</td>
-        <td style="border: 1px solid #000; padding: 6px; font-weight: bold; text-transform: uppercase;">${item.name}</td>
-        <td style="border: 1px solid #000; padding: 6px; font-family: monospace; font-size: 9px;">${item.code || '-'}</td>
-        <td style="border: 1px solid #000; padding: 6px; text-align: center;">${item.type === 'SERVICE' ? '∞' : item.stock}</td>
-        <td style="border: 1px solid #000; padding: 6px; text-align: right;">$ ${item.price.toFixed(2)}</td>
-        <td style="border: 1px solid #000; padding: 6px; text-align: right;">$ ${(item.replacementPrice || 0).toFixed(2)}</td>
-      </tr>
-    `).join('');
-
-    const html = `
-      <html>
-      <head>
-        <title>Inventario Maestro - ${name}</title>
-        <style>
-          @page { size: A4; margin: 1cm; }
-          body { font-family: sans-serif; font-size: 10px; padding: 10px; color: #000; line-height: 1.4; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #4c0519; padding-bottom: 10px; margin-bottom: 20px; }
-          .logo { height: 50px; }
-          .title { font-size: 18px; font-weight: 900; text-align: center; text-transform: uppercase; margin-bottom: 20px; color: #4c0519; letter-spacing: -0.5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-          th { background: #f3f4f6; border: 1px solid #000; padding: 10px; text-align: left; font-size: 9px; text-transform: uppercase; font-weight: 800; }
-          td { border: 1px solid #000; padding: 8px; vertical-align: top; }
-          .footer { margin-top: 30px; font-size: 8px; border-top: 1px solid #eee; padding-top: 10px; color: #666; display: flex; justify-content: space-between; }
-          .company-footer { margin-top: 40px; border-top: 1px solid #4c0519; padding-top: 15px; font-size: 9px; color: #444; text-align: center; clear: both; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <img src="${logo}" class="logo" />
-          <div style="text-align: right;">
-            <div style="font-size: 14px; font-weight: 900; color: #4c0519;">${name}</div>
-            <div style="font-size: 8px; font-weight: 700; color: #999; letter-spacing: 1px;">SISTEMA LOGISTIK PRO</div>
-          </div>
-        </div>
-        <div class="title">Listado Maestro de Inventario</div>
-        <table>
-          <thead>
-            <tr>
-              <th width="5%">#</th>
-              <th width="40%">Artículo / Mobiliario</th>
-              <th width="15%">Código</th>
-              <th width="10%">Stock</th>
-              <th width="15%" style="text-align:right;">P. Alquiler</th>
-              <th width="15%" style="text-align:right;">P. Reposición</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-        <div class="footer">
-          <div>Reporte generado el: ${new Date().toLocaleString()}</div>
-          <div>Usuario: ${currentUser?.name || 'Admin'}</div>
-          <div>Logistik v2.1.0</div>
-        </div>
-        <div class="company-footer">
-          <span style="margin-right: 15px;"><strong>📱</strong> 0998 858 204</span>
-          <span style="margin-right: 15px;"><strong>📍</strong> Cornelio Crespo y Manuel Ignacio Ochoa</span>
-          <span><strong>✉️</strong> infocasadelbanquete@gmail.com</span>
-        </div>
-        <script>window.onload=function(){setTimeout(()=>window.print(), 500)}</script>
-      </body>
-      </html>
-    `;
-
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-    } else {
-      uiService.alert("Navegador Bloqueado", "Por favor habilite los popups para imprimir.");
-    }
-  };
-
-  const handleExportExcel = () => {
-    const headers = ['No', 'Nombre del Articulo', 'Codigo', 'Stock Actual', 'Precio Alquiler', 'Precio Reposicion'];
-    const csvRows = [
-      headers.join(';'),
-      ...filteredItems.map((item, index) => [
-        index + 1,
-        `"${item.name}"`,
-        `"${item.code || ''}"`,
-        item.type === 'SERVICE' ? 'Infinito' : item.stock,
-        item.price.toFixed(2),
-        (item.replacementPrice || 0).toFixed(2)
-      ].join(';'))
-    ].join('\r\n');
-
-    const blob = new Blob(["\ufeff" + csvRows], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `inventario_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const performSave = async () => {
     try {
         const stockValue = formData.type === 'SERVICE' ? 999999 : (parseInt(formData.stock) || 0);
@@ -178,39 +69,43 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
             stock: stockValue, 
             price: parseFloat(formData.price) || 0, 
             replacementPrice: parseFloat(formData.replacementPrice) || 0, 
-            id: editingItem ? editingItem.id : '' 
+            id: editingIdForSave()
         } as InventoryItem;
         
-        // Corrected method name to saveInventoryItem
         await storageService.saveInventoryItem(itemToSave);
         
-        if (editingItem) {
-            setIsModalOpen(false);
-            await uiService.alert("Actualización Exitosa", "La ficha del activo ha sido actualizada en el catálogo.");
-            setFormData(initialFormState);
-        } else {
-            const continueAdding = await uiService.confirm(
-                "¡Artículo Registrado!", 
-                "El producto se guardó correctamente. ¿Deseas ingresar otro artículo ahora?", 
-                "Sí, ingresar otro", 
-                "No, finalizar"
-            );
+        const confirmMsg = editingItem 
+            ? "¿Deseas seguir editando otros artículos o terminar el proceso?"
+            : "El producto se guardó correctamente. ¿Deseas ingresar otro artículo ahora?";
 
-            if (continueAdding) {
+        const continueProcess = await uiService.confirm(
+            editingItem ? "Cambios Guardados" : "¡Artículo Registrado!", 
+            confirmMsg, 
+            editingItem ? "Seguir Editando" : "Sí, ingresar otro", 
+            "No, finalizar"
+        );
+
+        if (continueProcess) {
+            if (editingItem) {
+                setIsModalOpen(false); // Cerramos para que elija otro de la lista
+                setFormData(initialFormState);
+            } else {
                 setFormData({ 
                     ...initialFormState, 
                     category: formData.category, 
                     code: generateUniqueCode() 
                 });
-            } else {
-                setIsModalOpen(false);
-                setFormData(initialFormState);
             }
+        } else {
+            setIsModalOpen(false);
+            setFormData(initialFormState);
         }
     } catch (e: any) { 
         uiService.alert("Error de Sistema", e.message); 
     }
   };
+
+  const editingIdForSave = () => editingItem ? editingItem.id : '';
 
   const handleUpdateStock = async () => {
       if (!stockEntryItem || !stockEntryQty) return;
@@ -226,7 +121,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
 
   const handleDeleteItem = async (item: InventoryItem) => {
       if (await uiService.confirm("Baja Definitiva", `¿Desea remover "${item.name}" del catálogo? Esta acción no se puede revertir.`)) {
-          // Corrected method name to deleteInventoryItem
           await storageService.deleteInventoryItem(item.id);
           await uiService.alert("Eliminado", "El artículo ha sido removido del sistema.");
       }
@@ -307,32 +201,15 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
                   </div>
               </div>
           ))}
-          {filteredItems.length === 0 && (
-            <div className="col-span-full py-20 text-center opacity-20 uppercase font-black tracking-[0.5em] text-xs">
-                Sin resultados
-            </div>
-          )}
       </div>
 
-      {/* Stock Adjust Modal */}
       {isStockModalOpen && stockEntryItem && (
           <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-md flex items-center justify-center p-6 z-[200] animate-fade-in">
-              <div className="bg-white rounded-[3rem] shadow-premium w-full max-w-sm p-12 text-center animate-slide-up border border-white">
-                  <div className="w-20 h-20 bg-violet-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8">
-                      <span className="text-4xl">📦</span>
-                  </div>
+              <div className="bg-white rounded-[3rem] shadow-premium w-full max-w-sm p-12 text-center border border-white animate-slide-up">
+                  <div className="w-20 h-20 bg-violet-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 text-4xl">📦</div>
                   <h3 className="text-2xl font-black text-zinc-900 mb-2 tracking-tighter uppercase">Gestión Stock</h3>
                   <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-10 truncate">{stockEntryItem.name}</p>
-                  <div className="mb-10">
-                      <input 
-                        type="number" 
-                        autoFocus
-                        className="w-full bg-[#F8F9FA] border-none rounded-3xl h-24 text-center text-6xl font-black text-zinc-950 focus:ring-8 focus:ring-violet-50 transition-all outline-none shadow-inner" 
-                        placeholder="0"
-                        value={stockEntryQty}
-                        onChange={e => setStockEntryQty(e.target.value)}
-                      />
-                  </div>
+                  <input type="number" autoFocus className="w-full bg-[#F8F9FA] border-none rounded-3xl h-24 text-center text-6xl font-black text-zinc-950 focus:ring-8 focus:ring-violet-50 transition-all outline-none shadow-inner mb-10" placeholder="0" value={stockEntryQty} onChange={e => setStockEntryQty(e.target.value)} />
                   <div className="flex flex-col gap-4">
                       <button onClick={handleUpdateStock} className="w-full py-5 bg-zinc-950 text-white rounded-[1.5rem] font-black shadow-2xl hover:bg-zinc-800 transition-all uppercase text-[10px] tracking-widest">Sincronizar</button>
                       <button onClick={() => setIsStockModalOpen(false)} className="w-full py-3 text-zinc-300 font-black uppercase text-[9px]">Cerrar</button>
@@ -341,13 +218,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
           </div>
       )}
 
-      {/* Ficha Técnica Modal */}
       {isModalOpen && (
           <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-md flex items-center justify-center p-4 z-[150] animate-fade-in">
               <div className="bg-[#FAF9F6] rounded-[4xl] shadow-premium w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden border border-white animate-slide-up">
                   <div className="p-10 flex justify-between items-center border-b border-zinc-100 bg-white/50">
                       <div>
-                        <h3 className="text-3xl font-black text-zinc-950 tracking-tighter uppercase">{editingItem ? 'Ficha de Activo' : 'Alta de Mobiliario'}</h3>
+                        <h3 className="text-3xl font-black text-zinc-950 tracking-tighter uppercase">{editingItem ? 'Editar Ficha' : 'Alta de Mobiliario'}</h3>
                         <p className="text-zinc-400 text-[9px] font-black uppercase tracking-[0.4em] mt-1">Control central de inventario Logistik</p>
                       </div>
                       <button onClick={() => setIsModalOpen(false)} className="w-12 h-12 bg-white rounded-full shadow-soft flex items-center justify-center text-zinc-300 hover:text-zinc-950 transition-colors text-xl">✕</button>
@@ -355,7 +231,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
                   
                   <div className="flex-1 overflow-y-auto p-10 scrollbar-hide">
                       <form onSubmit={(e) => { e.preventDefault(); performSave(); }} className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                          
                           <div className="space-y-8">
                                 <div className="space-y-6">
                                    <div>
