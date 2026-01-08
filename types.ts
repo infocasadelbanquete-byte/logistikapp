@@ -15,7 +15,7 @@ export interface User {
   role: UserRole;
   status?: UserStatus;
   lastActive?: string;
-  isLocked?: boolean; // Required for security alerts
+  isLocked?: boolean;
 }
 
 export interface Client {
@@ -30,7 +30,7 @@ export interface Client {
 }
 
 export type InventoryType = 'PRODUCT' | 'SERVICE';
-export type PresentationType = 'UNIT' | 'BOX'; // Added for inventory management
+export type PresentationType = 'UNIT' | 'BOX';
 
 export interface InventoryItem {
   id: string;
@@ -43,8 +43,8 @@ export interface InventoryItem {
   type: InventoryType;
   images: string[];
   code?: string;
-  presentationType?: PresentationType; // Added to fix InventoryView errors
-  quantityPerBox?: number; // Added to fix InventoryView errors
+  presentationType?: PresentationType;
+  quantityPerBox?: number;
 }
 
 export enum EventStatus {
@@ -90,7 +90,7 @@ export interface PaymentTransaction {
 export interface EventOrder {
   id: string;
   orderNumber: number;
-  warehouseExitNumber?: number; // Campo numérico EB N°
+  warehouseExitNumber?: number;
   clientId: string;
   clientName: string;
   orderDate: string;
@@ -112,8 +112,8 @@ export interface EventOrder {
   returnNotes?: string;
   withheldAmount?: number;
   transactions?: PaymentTransaction[];
-  invoiceNumber?: string; // Added for InvoicingView
-  invoiceGenerated?: boolean; // Added for InvoicingView
+  invoiceNumber?: string;
+  invoiceGenerated?: boolean;
 }
 
 export enum PurchaseDocType {
@@ -139,9 +139,9 @@ export interface PurchaseTransaction {
   docNumber: string;
   total: number;
   details: string;
-  provider: Provider; // Required for PurchasesView
-  docType: PurchaseDocType; // Required for PurchasesView
-  values: { // Required for PurchasesView
+  provider: Provider;
+  docType: PurchaseDocType;
+  values: {
     subtotal15: number;
     subtotal0: number;
     subtotalRise: number;
@@ -149,7 +149,7 @@ export interface PurchaseTransaction {
     vat15: number;
     total: number;
   };
-  payment: { // Required for PurchasesView
+  payment: {
     method: string;
     bank?: string;
     institution?: string;
