@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus } from '../../types';
-import { storageService } from '../../services/storageService';
+import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus, CompanySettings, PaymentMethod } from '../../types';
+import { storageService, DRAFT_KEYS } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
 
 const EventsView: React.FC = () => {
@@ -14,8 +13,12 @@ const EventsView: React.FC = () => {
   const [itemSearch, setItemSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [showClientResults, setShowClientResults] = useState(false);
+  const [showQuickClient, setShowQuickClient] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // Quick Client Form
+  const [qClient, setQClient] = useState({ name: '', documentId: '', phone: '' });
 
   const initialState: Partial<EventOrder> = {
     items: [], status: EventStatus.RESERVED, paymentStatus: PaymentStatus.CREDIT, paidAmount: 0, 
@@ -28,31 +31,40 @@ const EventsView: React.FC = () => {
 
   useEffect(() => {
     const unsub = storageService.subscribeToEvents((all) => {
-        // RESTITUCIÓN: Reconocimiento de estados en español e inglés
-        const relevantEvents = all.filter(e => {
+        // FILTRO ROBUSTO: Garantiza visibilidad de estados anteriores
+        setEvents(all.filter(e => {
             const s = String(e.status).toUpperCase();
-            return s === 'RESERVED' || s === 'RESERVADO' || s === 'CONFIRMADO' || s === 'PEDIDO';
-        });
-        setEvents(relevantEvents);
-
-        // Lógica de redirección desde Reportes
-        const targetOrderId = localStorage.getItem('logistik_goto_order');
-        if (targetOrderId) {
-            const target = relevantEvents.find(ev => ev.id === targetOrderId);
-            if (target) {
-                setEditingId(target.id);
-                setNewEvent(target);
-                setClientSearch(target.clientName);
-                setStep(1);
-                setViewMode('create');
-            }
-            localStorage.removeItem('logistik_goto_order');
-        }
+            return ['RESERVED', 'RESERVADO', 'CONFIRMADO', 'PEDIDO', 'DELIVERED', 'ENTREGADO'].includes(s);
+        }));
     });
     storageService.subscribeToClients(setClients);
     storageService.subscribeToInventory(setInventory);
+
+    // Lógica de Borradores
+    if (storageService.hasDraft(DRAFT_KEYS.EVENT) && viewMode === 'list') {
+        uiService.confirm("Borrador Detectado", "¿Deseas recuperar el pedido que dejaste pendiente?", "Sí, recuperar", "No, borrar")
+            .then(res => {
+                if (res) {
+                    const draft = storageService.getDraft(DRAFT_KEYS.EVENT);
+                    setNewEvent(draft);
+                    setClientSearch(draft.clientName || '');
+                    setStep(draft.step || 1);
+                    setViewMode('create');
+                } else {
+                    storageService.removeDraft(DRAFT_KEYS.EVENT);
+                }
+            });
+    }
+
     return () => unsub();
   }, []);
+
+  // Guardar borrador automáticamente al cambiar datos
+  useEffect(() => {
+    if (viewMode === 'create' && !editingId && (newEvent.clientId || newEvent.items?.length)) {
+        storageService.saveDraft(DRAFT_KEYS.EVENT, { ...newEvent, step });
+    }
+  }, [newEvent, step, viewMode, editingId]);
 
   const calculateTotal = (updates: Partial<EventOrder> = {}) => {
     setNewEvent(prev => {
@@ -71,9 +83,19 @@ const EventsView: React.FC = () => {
     setIsSaving(true);
     try {
         await storageService.saveEvent({ ...newEvent as EventOrder, id: editingId || '', status: EventStatus.RESERVED });
-        await uiService.alert("Éxito", "Pedido registrado y stock reservado.");
+        storageService.removeDraft(DRAFT_KEYS.EVENT);
+        await uiService.alert("Éxito", "Pedido confirmado y stock reservado.");
         setViewMode('list'); setEditingId(null);
     } catch (e: any) { uiService.alert("Error", e.message); } finally { setIsSaving(false); }
+  };
+
+  const handleQuickClient = async () => {
+      if (!qClient.name) return;
+      const id = await storageService.saveClient({ id: '', ...qClient, email: '', address: '', documentId: qClient.documentId || '' });
+      setNewEvent(p => ({ ...p, clientId: id, clientName: qClient.name }));
+      setClientSearch(qClient.name);
+      setShowQuickClient(false);
+      setQClient({ name: '', documentId: '', phone: '' });
   };
 
   return (
@@ -89,7 +111,7 @@ const EventsView: React.FC = () => {
                         <div key={e.id} className="bg-white p-5 rounded-[2rem] shadow-soft border border-zinc-100 flex flex-col hover:shadow-premium transition-all">
                             <div className="flex justify-between items-start mb-4">
                                 <span className="text-[10px] font-black text-zinc-300">ORD-{e.orderNumber}</span>
-                                <span className="text-xs font-black text-brand-900 uppercase bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-100">Reservado</span>
+                                <span className="text-[8px] font-black text-brand-900 uppercase bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-100">Reservado</span>
                             </div>
                             <h3 className="text-xs font-black text-zinc-800 uppercase truncate mb-1">{e.clientName}</h3>
                             <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-4">🗓️ {e.executionDate}</p>
@@ -99,7 +121,7 @@ const EventsView: React.FC = () => {
                             </div>
                         </div>
                     ))}
-                    {events.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin pedidos por procesar</div>}
+                    {events.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin pedidos en el historial</div>}
                 </div>
             </div>
         ) : (
@@ -112,12 +134,15 @@ const EventsView: React.FC = () => {
                     <button onClick={() => setViewMode('list')} className="text-zinc-400 hover:text-zinc-950 font-black">✕</button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 scrollbar-hide">
+                <div className="flex-1 overflow-y-auto p-4 md:p-10 space-y-8 scrollbar-hide">
                     {step === 1 && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 animate-fade-in">
                             <div className="space-y-6">
                                 <div>
-                                    <label className="text-[10px] font-black text-zinc-400 uppercase px-2 mb-1 block">Cliente *</label>
+                                    <div className="flex justify-between items-center px-2 mb-1">
+                                        <label className="text-[10px] font-black text-zinc-400 uppercase">Cliente *</label>
+                                        <button onClick={() => setShowQuickClient(true)} className="text-[9px] font-black text-brand-600 uppercase underline">+ Registro Express</button>
+                                    </div>
                                     <div className="relative">
                                         <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 font-bold uppercase text-xs" placeholder="Buscar..." value={clientSearch} onChange={e => { setClientSearch(e.target.value); setShowClientResults(true); }} onFocus={() => setShowClientResults(true)} />
                                         {showClientResults && (
@@ -228,6 +253,24 @@ const EventsView: React.FC = () => {
                 <div className="p-6 bg-zinc-50 border-t flex justify-between">
                     {step > 1 && <button onClick={() => setStep(step - 1)} className="px-6 text-zinc-400 font-bold text-[10px] uppercase">Anterior</button>}
                     {step < 3 && <button onClick={() => setStep(step + 1)} disabled={step === 1 && !newEvent.clientId} className="ml-auto px-10 py-3 bg-brand-900 text-white rounded-xl font-black text-[10px] uppercase shadow-lg disabled:opacity-30">Continuar ❯</button>}
+                </div>
+            </div>
+        )}
+
+        {/* Quick Client Modal */}
+        {showQuickClient && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-premium animate-bounce-up">
+                    <h4 className="text-lg font-black text-brand-900 uppercase mb-6 tracking-tighter">Registro Express</h4>
+                    <div className="space-y-4">
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="Nombre completo / Razón Social" value={qClient.name} onChange={e => setQClient({...qClient, name: e.target.value})} />
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="RUC / Cédula" value={qClient.documentId} onChange={e => setQClient({...qClient, documentId: e.target.value})} />
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="Teléfono" value={qClient.phone} onChange={e => setQClient({...qClient, phone: e.target.value})} />
+                        <div className="flex gap-2 pt-4">
+                            <button onClick={() => setShowQuickClient(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[10px]">Cancelar</button>
+                            <button onClick={handleQuickClient} disabled={!qClient.name} className="flex-[2] py-3 bg-brand-900 text-white rounded-xl font-black uppercase text-[10px] shadow-lg disabled:opacity-30">Guardar Cliente</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         )}

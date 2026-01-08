@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus } from '../../types';
-import { storageService } from '../../services/storageService';
+import { storageService, DRAFT_KEYS } from '../../services/storageService';
 import { uiService } from '../../services/uiService'; 
 
 const QuotesView: React.FC = () => {
@@ -13,8 +13,11 @@ const QuotesView: React.FC = () => {
   const [itemSearch, setItemSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [showClientResults, setShowClientResults] = useState(false);
+  const [showQuickClient, setShowQuickClient] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [qClient, setQClient] = useState({ name: '', documentId: '', phone: '' });
 
   const initialState: Partial<EventOrder> = {
     items: [], status: EventStatus.QUOTE, paymentStatus: PaymentStatus.CREDIT, paidAmount: 0, 
@@ -27,16 +30,40 @@ const QuotesView: React.FC = () => {
 
   useEffect(() => {
     const unsub = storageService.subscribeToEvents((all) => {
-        // RESTITUCIÓN: Se incluyen todos los estados que representen proformas/cotizaciones
+        // FILTRO ROBUSTO PARA RESTITUCIÓN
         setQuotes(all.filter(e => {
             const s = String(e.status).toUpperCase();
-            return s === 'QUOTE' || s === 'PROFORMA' || s === 'COTIZACION' || s === 'PRESUPUESTO';
+            return ['QUOTE', 'PROFORMA', 'COTIZACION', 'PRESUPUESTO'].includes(s);
         }));
     });
     storageService.subscribeToClients(setClients);
     storageService.subscribeToInventory(setInventory);
+
+    // Lógica de Borradores
+    if (storageService.hasDraft(DRAFT_KEYS.QUOTE) && viewMode === 'list') {
+        uiService.confirm("Proforma Pendiente", "¿Deseas continuar con la proforma que estabas redactando?", "Continuar", "Nueva")
+            .then(res => {
+                if (res) {
+                    const draft = storageService.getDraft(DRAFT_KEYS.QUOTE);
+                    setNewQuote(draft);
+                    setClientSearch(draft.clientName || '');
+                    setStep(draft.step || 1);
+                    setViewMode('create');
+                } else {
+                    storageService.removeDraft(DRAFT_KEYS.QUOTE);
+                }
+            });
+    }
+
     return () => unsub();
   }, []);
+
+  // Guardar borrador
+  useEffect(() => {
+    if (viewMode === 'create' && !editingId && (newQuote.clientId || newQuote.items?.length)) {
+        storageService.saveDraft(DRAFT_KEYS.QUOTE, { ...newQuote, step });
+    }
+  }, [newQuote, step, viewMode, editingId]);
 
   const calculateTotal = (updates: Partial<EventOrder> = {}) => {
     setNewQuote(prev => {
@@ -55,9 +82,19 @@ const QuotesView: React.FC = () => {
     setIsSaving(true);
     try {
         await storageService.saveEvent({ ...newQuote as EventOrder, id: editingId || '', status: EventStatus.QUOTE });
+        storageService.removeDraft(DRAFT_KEYS.QUOTE);
         await uiService.alert("Éxito", "Proforma emitida correctamente.");
         setViewMode('list'); setEditingId(null);
     } catch (e: any) { uiService.alert("Error", e.message); } finally { setIsSaving(false); }
+  };
+
+  const handleQuickClient = async () => {
+    if (!qClient.name) return;
+    const id = await storageService.saveClient({ id: '', ...qClient, email: '', address: '', documentId: qClient.documentId || '' });
+    setNewQuote(p => ({ ...p, clientId: id, clientName: qClient.name }));
+    setClientSearch(qClient.name);
+    setShowQuickClient(false);
+    setQClient({ name: '', documentId: '', phone: '' });
   };
 
   const handleConfirm = async (q: EventOrder) => {
@@ -101,12 +138,15 @@ const QuotesView: React.FC = () => {
                     <button onClick={() => setViewMode('list')} className="text-zinc-400 hover:text-zinc-950 font-black">✕</button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8 scrollbar-hide">
+                <div className="flex-1 overflow-y-auto p-4 md:p-10 space-y-8 scrollbar-hide">
                     {step === 1 && (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 animate-fade-in">
                             <div className="space-y-6">
                                 <div>
-                                    <label className="text-[10px] font-black text-zinc-400 uppercase px-2 mb-1 block">Cliente *</label>
+                                    <div className="flex justify-between items-center px-2 mb-1">
+                                        <label className="text-[10px] font-black text-zinc-400 uppercase">Cliente *</label>
+                                        <button onClick={() => setShowQuickClient(true)} className="text-[9px] font-black text-brand-600 uppercase underline">+ Registro Express</button>
+                                    </div>
                                     <div className="relative">
                                         <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 font-bold uppercase text-xs" placeholder="Buscar..." value={clientSearch} onChange={e => { setClientSearch(e.target.value); setShowClientResults(true); }} onFocus={() => setShowClientResults(true)} />
                                         {showClientResults && (
@@ -217,6 +257,24 @@ const QuotesView: React.FC = () => {
                 <div className="p-6 bg-zinc-50 border-t flex justify-between">
                     {step > 1 && <button onClick={() => setStep(step - 1)} className="px-6 text-zinc-400 font-bold text-[10px] uppercase">Anterior</button>}
                     {step < 3 && <button onClick={() => setStep(step + 1)} disabled={step === 1 && !newQuote.clientId} className="ml-auto px-10 py-3 bg-brand-900 text-white rounded-xl font-black text-[10px] uppercase shadow-lg disabled:opacity-30">Continuar ❯</button>}
+                </div>
+            </div>
+        )}
+
+        {/* Quick Client Modal */}
+        {showQuickClient && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-premium animate-bounce-up">
+                    <h4 className="text-lg font-black text-brand-900 uppercase mb-6 tracking-tighter">Registro Express</h4>
+                    <div className="space-y-4">
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="Nombre completo / Razón Social" value={qClient.name} onChange={e => setQClient({...qClient, name: e.target.value})} />
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="RUC / Cédula" value={qClient.documentId} onChange={e => setQClient({...qClient, documentId: e.target.value})} />
+                        <input className="w-full h-12 bg-zinc-50 border-none rounded-xl px-4 text-xs font-bold" placeholder="Teléfono" value={qClient.phone} onChange={e => setQClient({...qClient, phone: e.target.value})} />
+                        <div className="flex gap-2 pt-4">
+                            <button onClick={() => setShowQuickClient(false)} className="flex-1 py-3 text-zinc-300 font-black uppercase text-[10px]">Cancelar</button>
+                            <button onClick={handleQuickClient} disabled={!qClient.name} className="flex-[2] py-3 bg-brand-900 text-white rounded-xl font-black uppercase text-[10px] shadow-lg disabled:opacity-30">Guardar Cliente</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         )}
