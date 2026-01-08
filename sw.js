@@ -1,7 +1,7 @@
-const CACHE_NAME = 'logistik-cache-v24';
+const CACHE_NAME = 'logistik-cache-v2.2.3';
 const STATIC_ASSETS = [
   './',
-  'index.html',
+  './index.html',
   'manifest.json',
   'index.tsx',
   'constants.ts',
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('PWA: Precaching assets v24');
+      console.log('PWA: Precaching assets v2.2.3');
       return cache.addAll(STATIC_ASSETS);
     })
   );
@@ -36,8 +36,15 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // No cachear llamadas a Firebase
+  
   if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('firebaseio.com')) return;
+
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('./index.html') || caches.match('index.html'))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {

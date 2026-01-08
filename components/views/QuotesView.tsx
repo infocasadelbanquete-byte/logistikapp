@@ -4,22 +4,6 @@ import { storageService, DRAFT_KEYS } from '../../services/storageService';
 import { uiService } from '../../services/uiService'; 
 import { COMPANY_LOGO, COMPANY_NAME } from '../../constants';
 
-const SERVICE_CONDITIONS = `
-<div style="margin-top:20px; font-size:8px; line-height:1.2; text-align:justify; border-top:1px solid #eee; padding-top:10px;">
-  <strong>CONDICIONES DEL SERVICIO:</strong><br/>
-  a) El cliente lee y acepta los servicios tal y como se detallan en la presente cotización, al igual en la forma indicada por el personal de La Casa del Banquete.<br/>
-  b) El cliente acuerda conjuntamente con La Casa del Banquete la forma y momento de entrega de los servicios contratados.<br/>
-  c) En caso de que la entrega no se la realice el momento acordado, una vez estando nuestro personal en el sitio señalado para el montaje del servicio, el cliente asumirá un costo adicional por motivos de un nuevo traslado.<br/>
-  d) En caso de que la entrega no se la realice en el lugar acordado, una vez estando nuestro personal en el sitio señalado para el montaje del servicio, el cliente asumirá un costo adicional por motivos de un nuevo traslado.<br/>
-  e) En caso que el cliente requiera adicionar más servicios o implementos una vez estando el personal de La Casa del Banquete en el lugar del montaje, el cliente asumirá un costo adicional por traslado del o los servicios adicionales.<br/>
-  f) El cliente es responsable de recibir y revisar detalladamente los artículos contratados para el servicio acordado, con el fin de verificar el estado en el que se entregan los mismos.<br/>
-  g) El servicio de saloneros es de máximo 5 horas, en caso de requerir mas tiempo de servicio, se deberá cubrir un valor adicional de $8.00 por hora por salonero y un valor adicional de transporte de $5.00 de igual manera por cada salonero.<br/>
-  h) Todo articulo como vajilla, cristalería, cubertería, fuentes, samovares, bandejas, y otros que ameriten, deben regresar lavados, caso contrario no se procederá la recepción de los mismos el momento de retirar los implementos solicitados para el servicio.<br/>
-  i) Todo articulo o implemento que presente roturas, fisuras o pérdida al momento del retiro del servicio, será asumido por el cliente con el valor respectivo a cada implemento, al igual que la mantelería o lonas que presenten manchas que representen un daño permanente al artículo referido.<br/>
-  <br/>
-  <strong>FORMA DE PAGO:</strong> 50 % anticipo 50% contra entrega a excepción de empresas o instituciones (crédito directo). El pago puede ser en efectivo, cheque o transferencia bancaria.
-</div>`;
-
 const QuotesView: React.FC = () => {
   const [quotes, setQuotes] = useState<EventOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -62,9 +46,8 @@ const QuotesView: React.FC = () => {
     const session = storageService.getCurrentSession();
     setCurrentUser(session);
     const unsubEvents = storageService.subscribeToEvents((all) => {
-        // Filtrar estrictamente por estado QUOTE (Proforma)
-        const proformas = all.filter(e => e.status === EventStatus.QUOTE);
-        setQuotes(proformas);
+        // PERMANENCIA: Solo proformas en este módulo
+        setQuotes(all.filter(e => e.status === EventStatus.QUOTE));
     });
     const unsubClients = storageService.subscribeToClients(setClients);
     const unsubInventory = storageService.subscribeToInventory(setInventory);
@@ -166,7 +149,7 @@ const QuotesView: React.FC = () => {
             ...newQuote as EventOrder, 
             id: editingId || '', 
             orderNumber: orderNumberResult, 
-            status: EventStatus.QUOTE, // Forzamos siempre QUOTE al guardar proforma
+            status: EventStatus.QUOTE,
             deliveryCost: parseAmount(newQuote.deliveryCost),
             items: (newQuote.items || []).map(i => ({...i, priceAtBooking: parseAmount(i.priceAtBooking)}))
         };
@@ -178,13 +161,32 @@ const QuotesView: React.FC = () => {
   };
 
   const handleConfirmQuote = async (quote: EventOrder) => {
-    if (await uiService.confirm("Confirmar Pedido", `¿Convertir PRO-${quote.orderNumber} en Pedido? Se descontará stock de inventario.`)) {
-        try { 
-            // Al confirmar, cambia de QUOTE a RESERVED y obtiene un nuevo número de orden de pedidos
-            await storageService.saveEvent({ ...quote, status: EventStatus.RESERVED, orderNumber: 0 }); 
-            uiService.alert("Éxito", "Proforma convertida en Pedido exitosamente."); 
-        } catch (e) { 
-            uiService.alert("Error", "No se pudo procesar la conversión."); 
+    const editFirst = await uiService.confirm(
+        "Confirmar Proforma", 
+        `¿Deseas editar los detalles de PRO-${quote.orderNumber} antes de confirmarla o pasarla directamente como Pedido confirmado?`, 
+        "Editar", 
+        "Confirmar Directo"
+    );
+
+    if (editFirst) {
+        setEditingId(quote.id);
+        setNewQuote(quote);
+        setClientSearch(quote.clientName);
+        setStep(1);
+        setViewMode('create');
+    } else {
+        if (await uiService.confirm("Mover a Pedidos", "¿Convertir esta proforma en un Pedido Confirmado? Esto descontará el stock del inventario.")) {
+            try {
+                // Al confirmar, cambia de estado QUOTE a RESERVED y obtiene número de pedido real
+                await storageService.saveEvent({ 
+                    ...quote, 
+                    status: EventStatus.RESERVED, 
+                    orderNumber: 0 // Generará nuevo ORD-XXXX
+                }); 
+                uiService.alert("Éxito", "La proforma se ha convertido en Pedido y ha pasado al módulo correspondiente.");
+            } catch (e) {
+                uiService.alert("Error", "No se pudo realizar la confirmación.");
+            }
         }
     }
   };
@@ -195,8 +197,6 @@ const QuotesView: React.FC = () => {
     const matchesDate = !dateFilter || q.executionDates?.includes(dateFilter) || q.executionDate === dateFilter;
     return matchesSearch && matchesDate;
   });
-
-  const canDelete = currentUser?.role === UserRole.SUPER_ADMIN || currentUser?.role === UserRole.ADMIN;
 
   return (
     <div className="space-y-6 animate-fade-in h-full">
@@ -228,8 +228,8 @@ const QuotesView: React.FC = () => {
                         <div className="mt-auto pt-4 border-t border-sky-100/50 flex items-center justify-between">
                             <div className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">📅 {q.executionDates?.length || 1} días</div>
                             <div className="flex gap-1.5">
-                                <button onClick={() => handleConfirmQuote(q)} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase shadow-md active:scale-90">Confirmar</button>
-                                <button onClick={() => { setEditingId(q.id); setNewQuote(q); setClientSearch(q.clientName); setStep(1); setViewMode('create'); }} className="w-8 h-8 bg-white text-zinc-400 border border-sky-100 rounded-lg flex items-center justify-center">✏️</button>
+                                <button onClick={() => handleConfirmQuote(q)} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase shadow-md active:scale-90 transition-transform">Confirmar</button>
+                                <button onClick={() => { setEditingId(q.id); setNewQuote(q); setClientSearch(q.clientName); setStep(1); setViewMode('create'); }} className="w-8 h-8 bg-white text-zinc-400 border border-sky-100 rounded-lg flex items-center justify-center hover:text-zinc-950">✏️</button>
                             </div>
                         </div>
                     </div>

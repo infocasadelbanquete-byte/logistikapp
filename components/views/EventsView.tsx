@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, Client, InventoryItem, PaymentStatus, UserRole, CompanySettings, PaymentMethod, PaymentTransaction } from '../../types';
 import { storageService, DRAFT_KEYS } from '../../services/storageService';
@@ -61,30 +60,32 @@ const EventsView: React.FC = () => {
     return isNaN(num) ? 0 : num;
   };
 
-  const getCalculatedStatus = (event: EventOrder): string => {
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (event.status === EventStatus.DELIVERED) {
-          if (event.executionDates?.includes(todayStr) || event.executionDate === todayStr) return EventStatus.IN_PROGRESS;
-          const lastDate = event.executionDates ? [...event.executionDates].sort().pop() : event.executionDate;
-          if (lastDate && lastDate < todayStr) return EventStatus.FINISHED;
-      }
-      return event.status;
+  const getStatusDisplay = (status: EventStatus) => {
+    switch (status) {
+      case EventStatus.RESERVED: return { label: 'Reservado', color: 'bg-amber-100 text-amber-700 border-amber-200' };
+      case EventStatus.DELIVERED: return { label: 'Entregado', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+      case EventStatus.IN_PROGRESS: return { label: 'En Curso', color: 'bg-sky-100 text-sky-700 border-sky-200' };
+      case EventStatus.FINISHED: return { label: 'Finalizado', color: 'bg-rose-100 text-rose-700 border-rose-200' };
+      case EventStatus.WITH_ISSUES: return { label: 'Novedades', color: 'bg-red-100 text-red-700 border-red-200' };
+      case EventStatus.RETURNED: return { label: 'Retirado', color: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
+      default: return { label: status, color: 'bg-gray-100 text-gray-700 border-gray-200' };
+    }
   };
 
   useEffect(() => {
     const session = storageService.getCurrentSession();
     setCurrentUser(session);
-    const unsubEvents = storageService.subscribeToEvents((all) => setEvents(all.filter(e => 
-        e.status !== EventStatus.QUOTE && 
-        e.status !== EventStatus.RETURNED && 
-        e.status !== EventStatus.CANCELLED
-    )));
+    const unsubEvents = storageService.subscribeToEvents((all) => {
+        // FILTRADO ESTRICTO: Solo pedidos confirmados (RESERVED) que aún no han sido despachados
+        // Se limpian automáticamente al cambiar de estado en otros módulos
+        setEvents(all.filter(e => e.status === EventStatus.RESERVED));
+    });
     const unsubClients = storageService.subscribeToClients(setClients);
     const unsubInventory = storageService.subscribeToInventory(setInventory);
     const unsubSettings = storageService.subscribeToSettings(setSettings);
     if (storageService.hasDraft(DRAFT_KEYS.EVENT) && viewMode === 'list') { setShowDraftModal(true); }
     return () => { unsubEvents(); unsubClients(); unsubInventory(); unsubSettings(); }
-  }, []);
+  }, [viewMode]);
 
   useEffect(() => {
     const isActuallyWorking = viewMode === 'create' && !editingId && (newEvent.clientId || newEvent.items?.length || (newEvent.notes && newEvent.notes.length > 2) || newEvent.requiresDelivery);
@@ -117,7 +118,7 @@ const EventsView: React.FC = () => {
         return { 
           ...state, 
           rentalDays: days,
-          executionDate: selectedDates[0], // Siempre guardamos la primera como principal
+          executionDate: selectedDates[0],
           total: netSubtotal15 + tax + delivery, 
           taxAmount: tax 
         };
@@ -151,7 +152,7 @@ const EventsView: React.FC = () => {
 
   const removeDate = (date: string) => {
     const current = (newEvent.executionDates || []).filter(d => d !== date);
-    if (current.length === 0) return; // Al menos una fecha requerida
+    if (current.length === 0) return; 
     calculateTotal({ executionDates: current });
   };
 
@@ -277,7 +278,7 @@ const EventsView: React.FC = () => {
         {viewMode === 'list' && (
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-4">
                 <div className="flex-1 w-full space-y-2">
-                    <h2 className="text-lg font-black text-brand-900 uppercase tracking-tight">Registro de Reservas</h2>
+                    <h2 className="text-lg font-black text-brand-900 uppercase tracking-tight">Registro de Pedidos Activos</h2>
                     <div className="flex flex-col sm:flex-row gap-2">
                         <div className="flex-1 relative">
                             <input type="text" placeholder="Buscar..." className="w-full h-10 bg-white border border-zinc-100 rounded-xl px-10 text-[10px] font-bold shadow-soft outline-none focus:border-brand-200" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
@@ -286,31 +287,41 @@ const EventsView: React.FC = () => {
                         <input type="date" className="h-10 bg-white border border-zinc-100 rounded-xl px-3 text-[10px] font-bold shadow-soft" value={dateFilter} onChange={e => setDateFilter(e.target.value)} />
                     </div>
                 </div>
-                <button onClick={handleCreateNew} className="h-10 px-6 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-premium">+ Nuevo Registro</button>
+                <button onClick={handleCreateNew} className="h-10 px-6 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-premium">+ Nuevo Pedido</button>
             </div>
         )}
 
         {viewMode === 'list' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-                {filteredEvents.map(event => (
-                    <div key={event.id} className="bg-rose-50/60 rounded-[1.5rem] shadow-soft p-4 border border-rose-100/50 flex flex-col hover:shadow-premium transition-all group">
-                        <div className="flex justify-between items-start mb-3">
-                            <span className="text-[8px] font-black text-brand-800/40 bg-white px-2 py-0.5 rounded-lg border border-rose-100 shadow-sm uppercase">ORD-{String(event.orderNumber).padStart(4, '0')}</span>
-                            <span className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-tighter ${event.status === EventStatus.RESERVED ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{getCalculatedStatus(event)}</span>
+                {filteredEvents.map(event => {
+                    const statusInfo = getStatusDisplay(event.status);
+                    return (
+                        <div key={event.id} className="bg-rose-50/60 rounded-[1.5rem] shadow-soft p-4 border border-rose-100/50 flex flex-col hover:shadow-premium transition-all group">
+                            <div className="flex justify-between items-start mb-3">
+                                <span className="text-[8px] font-black text-brand-800/40 bg-white px-2 py-0.5 rounded-lg border border-rose-100 shadow-sm uppercase">ORD-{String(event.orderNumber).padStart(4, '0')}</span>
+                                <span className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-tighter border shadow-sm ${statusInfo.color}`}>
+                                    {statusInfo.label}
+                                </span>
+                            </div>
+                            <h3 className="text-xs font-black text-zinc-800 uppercase truncate mb-1">{event.clientName}</h3>
+                            <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-4">🗓️ {event.executionDates?.length || 1} día(s) | {event.executionDate}</p>
+                            <div className="flex justify-between items-center bg-white/80 p-3 rounded-xl mb-4 mt-auto border border-white">
+                                <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Total:</span>
+                                <span className="text-xs font-black text-brand-900 tracking-tight">$ {event.total.toFixed(2)}</span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5">
+                                <button title="Imprimir Comprobante" onClick={() => printOrder(event)} className="py-2 bg-zinc-950 text-white rounded-lg text-[8px] font-black uppercase hover:bg-black">📄</button>
+                                <button onClick={() => { setEditingId(event.id); setNewEvent(event); setClientSearch(event.clientName); setStep(1); setViewMode('create'); }} className="py-2 bg-white text-zinc-500 border border-rose-100 rounded-lg text-[8px] font-black uppercase hover:bg-zinc-50">EDIT</button>
+                                {canDelete && <button onClick={async () => { if (await uiService.confirm("Eliminar", "¿Eliminar pedido permanentemente?")) storageService.deleteEvent(event.id); }} className="py-2 bg-white text-rose-300 border border-rose-100 rounded-lg text-[8px] font-black uppercase hover:text-rose-600">🗑️</button>}
+                            </div>
                         </div>
-                        <h3 className="text-xs font-black text-zinc-800 uppercase truncate mb-1">{event.clientName}</h3>
-                        <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-4">🗓️ {event.executionDates?.length || 1} día(s) desde {event.executionDate}</p>
-                        <div className="flex justify-between items-center bg-white/80 p-3 rounded-xl mb-4 mt-auto border border-white">
-                            <span className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Total:</span>
-                            <span className="text-xs font-black text-brand-900 tracking-tight">$ {event.total.toFixed(2)}</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5">
-                            <button onClick={() => printOrder(event)} className="py-2 bg-zinc-950 text-white rounded-lg text-[8px] font-black uppercase">📄</button>
-                            <button onClick={() => { setEditingId(event.id); setNewEvent(event); setClientSearch(event.clientName); setStep(1); setViewMode('create'); }} className="py-2 bg-white text-zinc-500 border border-rose-100 rounded-lg text-[8px] font-black uppercase">EDIT</button>
-                            {canDelete && <button onClick={async () => { if (await uiService.confirm("Eliminar", "¿Eliminar pedido?")) storageService.deleteEvent(event.id); }} className="py-2 bg-white text-rose-300 border border-rose-100 rounded-lg text-[8px] font-black uppercase">🗑️</button>}
-                        </div>
+                    );
+                })}
+                {filteredEvents.length === 0 && (
+                    <div className="col-span-full py-20 text-center opacity-20 uppercase font-black tracking-[0.5em] text-xs">
+                        No hay pedidos activos por procesar
                     </div>
-                ))}
+                )}
             </div>
         ) : (
             <div className="bg-white/70 rounded-[2rem] md:rounded-[2.5rem] shadow-premium border border-zinc-100 animate-fade-in relative flex flex-col h-[calc(100vh-140px)] min-h-[500px]">
@@ -496,7 +507,7 @@ const EventsView: React.FC = () => {
         )}
         {showDraftModal && (
             <div className="fixed inset-0 bg-zinc-950/40 flex items-center justify-center z-[200] backdrop-blur-md p-4 animate-fade-in">
-                <div className="bg-white p-8 rounded-[2rem] shadow-premium max-w-sm w-full text-center">
+                <div className="bg-white p-8 rounded-[2rem] shadow-premium max-sm w-full text-center mx-4">
                     <div className="w-16 h-16 bg-brand-50 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4 text-3xl">📝</div>
                     <h3 className="font-black text-brand-900 text-lg uppercase mb-1">Borrador Detectado</h3>
                     <p className="text-zinc-400 text-xs mb-6 font-medium">¿Deseas recuperar los datos de la última sesión?</p>
