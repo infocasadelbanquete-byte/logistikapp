@@ -28,6 +28,10 @@ const EventsView: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Express Client States
+  const [isExpressModalOpen, setIsExpressModalOpen] = useState(false);
+  const [expressClientData, setExpressClientData] = useState({ name: '', documentId: '', mobilePhone: '' });
+
   const initialForm = {
     clientId: '',
     warehouseExitNumber: '',
@@ -95,6 +99,34 @@ const EventsView: React.FC = () => {
     resetForm();
   };
 
+  const handleSaveExpressClient = async () => {
+    if (!expressClientData.name) return uiService.alert("Faltan Datos", "El nombre es obligatorio.");
+    const newClient: Client = {
+      id: '',
+      name: expressClientData.name,
+      documentId: expressClientData.documentId,
+      email: '',
+      phone: '',
+      mobilePhone: expressClientData.mobilePhone,
+      address: ''
+    };
+    try {
+        await storageService.saveClient(newClient);
+        setIsExpressModalOpen(false);
+        setExpressClientData({ name: '', documentId: '', mobilePhone: '' });
+        uiService.alert("Éxito", "Cliente registrado.");
+    } catch (e) {
+        uiService.alert("Error", "No se pudo registrar al cliente.");
+    }
+  };
+
+  const handleSendToDispatch = async (o: EventOrder) => {
+      if (await uiService.confirm("Enviar a Despacho", `¿Autorizar el despacho del pedido #${o.orderNumber}?`)) {
+          await storageService.saveEvent({ ...o, status: EventStatus.DISPATCHED });
+          uiService.alert("Enviado", "El pedido ya está disponible en el módulo de Despachos.");
+      }
+  };
+
   const handleEdit = (o: EventOrder) => {
     setEditingId(o.id);
     const itemsWithData = o.items.map(oi => {
@@ -122,7 +154,7 @@ const EventsView: React.FC = () => {
               warehouseExitNumber: ebNum ? parseInt(ebNum) : undefined
           };
           await storageService.saveEvent(updated);
-          uiService.alert("Confirmado", "Pedido enviado a Despachos.");
+          uiService.alert("Confirmado", "Pedido creado satisfactoriamente.");
       }
   };
 
@@ -184,6 +216,9 @@ const EventsView: React.FC = () => {
                   {o.status === EventStatus.QUOTE && (
                       <button onClick={() => handleConfirmQuote(o)} className="w-full py-1.5 bg-emerald-600 text-white rounded-lg text-[8px] font-black uppercase">Confirmar Pedido</button>
                   )}
+                  {o.status === EventStatus.CONFIRMED && (
+                      <button onClick={() => handleSendToDispatch(o)} className="w-full py-1.5 bg-brand-900 text-white rounded-lg text-[8px] font-black uppercase">🚚 Enviar a Despacho</button>
+                  )}
                   <div className="flex gap-1">
                       <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-100 text-zinc-600 rounded-lg text-[8px] font-black uppercase">Editar</button>
                       <button onClick={() => handleCancelOrder(o)} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
@@ -200,10 +235,20 @@ const EventsView: React.FC = () => {
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-soft grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-400 uppercase px-2">Cliente *</label>
-                <select className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={formData.clientId} onChange={e => setFormData({...formData, clientId: e.target.value})}>
-                  <option value="">Seleccionar...</option>
-                  {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
-                </select>
+                <div className="flex gap-2">
+                    <select className="flex-1 h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={formData.clientId} onChange={e => setFormData({...formData, clientId: e.target.value})}>
+                      <option value="">Seleccionar...</option>
+                      {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
+                    </select>
+                    <button 
+                        type="button" 
+                        onClick={() => setIsExpressModalOpen(true)}
+                        className="w-12 h-12 bg-brand-900 text-white rounded-xl flex items-center justify-center font-black text-lg shadow-md"
+                        title="Cliente Nuevo (Express)"
+                    >
+                        +
+                    </button>
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-400 uppercase px-2">EB N° (Opcional)</label>
@@ -287,6 +332,49 @@ const EventsView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Express Client Modal */}
+      {isExpressModalOpen && (
+          <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-md flex items-center justify-center p-4 z-[200] animate-fade-in">
+              <div className="bg-white rounded-[2rem] shadow-premium p-8 w-full max-w-sm border border-white animate-slide-up">
+                  <h3 className="text-lg font-black text-brand-950 uppercase mb-4 border-b pb-3 tracking-tighter">Cliente Express</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre / Razón Social *</label>
+                          <input 
+                              autoFocus
+                              type="text" 
+                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
+                              value={expressClientData.name}
+                              onChange={e => setExpressClientData({...expressClientData, name: e.target.value})}
+                          />
+                      </div>
+                      <div>
+                          <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Identificación (C.I. / RUC)</label>
+                          <input 
+                              type="text" 
+                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
+                              value={expressClientData.documentId}
+                              onChange={e => setExpressClientData({...expressClientData, documentId: e.target.value})}
+                          />
+                      </div>
+                      <div>
+                          <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Celular de Contacto</label>
+                          <input 
+                              type="text" 
+                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
+                              value={expressClientData.mobilePhone}
+                              onChange={e => setExpressClientData({...expressClientData, mobilePhone: e.target.value})}
+                          />
+                      </div>
+                      <div className="flex gap-2 pt-4">
+                          <button onClick={() => setIsExpressModalOpen(false)} className="flex-1 py-3 text-zinc-400 font-black uppercase text-[8px]">Cancelar</button>
+                          <button onClick={handleSaveExpressClient} className="flex-[2] py-4 bg-brand-900 text-white rounded-xl font-black uppercase text-[8px] tracking-widest shadow-lg">Guardar y Usar</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );
