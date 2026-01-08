@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, Client, InventoryItem, PaymentMethod, PaymentStatus } from '../../types';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
+import { COMPANY_LOGO, COMPANY_NAME } from '../../constants';
 
 const getStatusStyle = (status: EventStatus) => {
   switch (status) {
@@ -28,7 +29,6 @@ const EventsView: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<any[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Express Client States
   const [isExpressModalOpen, setIsExpressModalOpen] = useState(false);
   const [expressClientData, setExpressClientData] = useState({ name: '', documentId: '', mobilePhone: '' });
 
@@ -50,9 +50,7 @@ const EventsView: React.FC = () => {
   const [formData, setFormData] = useState<any>(initialForm);
 
   useEffect(() => {
-    const unsub = storageService.subscribeToEvents(all => {
-      setOrders(all);
-    });
+    const unsub = storageService.subscribeToEvents(all => setOrders(all));
     storageService.subscribeToClients(setClients);
     storageService.subscribeToInventory(setInventory);
     return () => unsub();
@@ -67,63 +65,145 @@ const EventsView: React.FC = () => {
     }
   };
 
-  const calculateTotal = () => {
-    const itemsSub = selectedItems.reduce((acc, i) => acc + (i.price * i.quantity), 0) * (formData.rentalDays || 1);
-    const disc = formData.discountType === 'PERCENT' ? (itemsSub * (formData.discountValue / 100)) : (formData.discountValue || 0);
-    const base = itemsSub - disc;
+  const calculateFinancials = () => {
+    const subtotal = selectedItems.reduce((acc, i) => acc + (parseFloat(i.price) * i.quantity), 0) * (formData.rentalDays || 1);
+    const discount = formData.discountType === 'PERCENT' ? (subtotal * (formData.discountValue / 100)) : (parseFloat(formData.discountValue) || 0);
+    const base = subtotal - discount;
     const iva = formData.hasInvoice ? (base * 0.15) : 0;
     const delivery = formData.requiresDelivery ? (parseFloat(formData.deliveryCost) || 0) : 0;
-    return base + iva + delivery;
+    const total = base + iva + delivery;
+    return { subtotal, discount, base, iva, delivery, total };
+  };
+
+  const handlePrintOrder = async (order: EventOrder) => {
+    const settings = await storageService.getSettings();
+    const win = window.open('', '_blank');
+    if (!win) return;
+
+    const itemsRows = order.items.map(oi => {
+      const inv = inventory.find(i => i.id === oi.itemId);
+      const totalItem = oi.quantity * oi.priceAtBooking * (order.rentalDays || 1);
+      return `
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px; font-size: 10px; text-transform: uppercase;">${inv?.name || 'Artículo'}</td>
+          <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${oi.quantity}</td>
+          <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${order.rentalDays || 1}</td>
+          <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">$${oi.priceAtBooking.toFixed(2)}</td>
+          <td style="border: 1px solid #ddd; padding: 8px; text-align: right; font-weight: bold;">$${totalItem.toFixed(2)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const fin = {
+        subtotal: order.items.reduce((acc, i) => acc + (i.priceAtBooking * i.quantity), 0) * (order.rentalDays || 1),
+        iva: order.hasInvoice ? (order.total - (order.deliveryCost || 0)) * (0.15/1.15) : 0, // Cálculo aproximado para reporte
+    };
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>${order.status === EventStatus.QUOTE ? 'Proforma' : 'Pedido'} #${order.orderNumber}</title>
+          <style>
+            body { font-family: 'Plus Jakarta Sans', sans-serif; padding: 20px; color: #333; }
+            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #4c0519; padding-bottom: 15px; }
+            .logo { height: 60px; }
+            .title { text-align: right; }
+            .title h1 { margin: 0; color: #4c0519; font-size: 20px; text-transform: uppercase; }
+            .info-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th { background: #f8f8f8; border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 10px; text-transform: uppercase; }
+            .totals { margin-top: 20px; width: 300px; margin-left: auto; }
+            .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
+            .grand-total { border-top: 2px solid #4c0519; margin-top: 10px; padding-top: 10px; font-weight: 900; font-size: 16px; color: #4c0519; }
+            .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <img src="${settings?.logoUrl || COMPANY_LOGO}" class="logo" />
+            <div class="title">
+              <h1>${order.status === EventStatus.QUOTE ? 'PROFORMA' : 'PEDIDO DE RENTA'}</h1>
+              <div style="font-weight: 800; font-size: 14px;"># ${String(order.orderNumber).padStart(5, '0')}</div>
+            </div>
+          </div>
+          <div class="info-section">
+            <div>
+              <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #4c0519;">Cliente</div>
+              <div>${order.clientName}</div>
+              <div>Dirección: ${order.deliveryAddress || 'N/A'}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #4c0519;">Detalles</div>
+              <div>Fecha de Evento: ${order.executionDate}</div>
+              <div>Días de Alquiler: ${order.rentalDays || 1}</div>
+              ${order.warehouseExitNumber ? `<div>EB N°: ${order.warehouseExitNumber}</div>` : ''}
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Descripción del Mobiliario / Servicio</th>
+                <th style="text-align: center;">Cant</th>
+                <th style="text-align: center;">Días</th>
+                <th style="text-align: right;">P. Unit</th>
+                <th style="text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${itemsRows}</tbody>
+          </table>
+          <div class="totals">
+            <div class="total-row"><span>Subtotal:</span><span>$ ${fin.subtotal.toFixed(2)}</span></div>
+            ${order.deliveryCost ? `<div class="total-row"><span>Transporte:</span><span>$ ${order.deliveryCost.toFixed(2)}</span></div>` : ''}
+            <div class="total-row grand-total"><span>TOTAL:</span><span>$ ${order.total.toFixed(2)}</span></div>
+          </div>
+          <div class="footer">
+            Generado por Logistik Pro • ${settings?.name || COMPANY_NAME}<br/>
+            Este documento no constituye una factura legal.
+          </div>
+          <script>window.onload=function(){window.print(); setTimeout(()=>window.close(), 500);}</script>
+        </body>
+      </html>
+    `);
+    win.document.close();
   };
 
   const handleSave = async (asQuote: boolean = false) => {
     if (!formData.clientId || selectedItems.length === 0) return uiService.alert("Faltan Datos", "Seleccione cliente e ítems.");
-    const total = calculateTotal();
+    const { total } = calculateFinancials();
     const orderNumber = editingId ? orders.find(o => o.id === editingId)?.orderNumber || 0 : await storageService.generateOrderNumber();
     
     const order: EventOrder = {
       ...formData,
       id: editingId || '',
       orderNumber,
-      warehouseExitNumber: formData.warehouseExitNumber ? parseInt(formData.warehouseExitNumber) : undefined,
       clientName: clients.find(c => c.id === formData.clientId)?.name || 'Cliente',
       status: asQuote ? EventStatus.QUOTE : (editingId ? orders.find(o => o.id === editingId)?.status || EventStatus.CONFIRMED : EventStatus.CONFIRMED),
       paymentStatus: formData.paymentAmount >= total ? PaymentStatus.PAID : (formData.paymentAmount > 0 ? PaymentStatus.PARTIAL : PaymentStatus.CREDIT),
       paidAmount: parseFloat(formData.paymentAmount) || 0,
       total,
-      items: selectedItems.map(i => ({ itemId: i.id, quantity: i.quantity, priceAtBooking: i.price }))
+      items: selectedItems.map(i => ({ itemId: i.id, quantity: i.quantity, priceAtBooking: parseFloat(i.price) }))
     };
 
-    await storageService.saveEvent(order);
-    uiService.alert("Éxito", asQuote ? "Proforma guardada." : "Pedido guardado.");
+    const id = await storageService.saveEvent(order);
+    if (await uiService.confirm("Éxito", "¿Desea imprimir el comprobante ahora?")) {
+        handlePrintOrder({ ...order, id });
+    }
     resetForm();
   };
 
   const handleSaveExpressClient = async () => {
     if (!expressClientData.name) return uiService.alert("Faltan Datos", "El nombre es obligatorio.");
-    const newClient: Client = {
-      id: '',
-      name: expressClientData.name,
-      documentId: expressClientData.documentId,
-      email: '',
-      phone: '',
-      mobilePhone: expressClientData.mobilePhone,
-      address: ''
-    };
-    try {
-        await storageService.saveClient(newClient);
-        setIsExpressModalOpen(false);
-        setExpressClientData({ name: '', documentId: '', mobilePhone: '' });
-        uiService.alert("Éxito", "Cliente registrado.");
-    } catch (e) {
-        uiService.alert("Error", "No se pudo registrar al cliente.");
-    }
+    const newClient: Client = { id: '', name: expressClientData.name, documentId: expressClientData.documentId, email: '', phone: '', mobilePhone: expressClientData.mobilePhone, address: '' };
+    await storageService.saveClient(newClient);
+    setIsExpressModalOpen(false);
+    setExpressClientData({ name: '', documentId: '', mobilePhone: '' });
+    uiService.alert("Éxito", "Cliente registrado.");
   };
 
   const handleSendToDispatch = async (o: EventOrder) => {
       if (await uiService.confirm("Enviar a Despacho", `¿Autorizar el despacho del pedido #${o.orderNumber}?`)) {
           await storageService.saveEvent({ ...o, status: EventStatus.DISPATCHED });
-          uiService.alert("Enviado", "El pedido ya está disponible en el módulo de Despachos.");
+          uiService.alert("Enviado", "Pedido disponible en Despachos.");
       }
   };
 
@@ -131,7 +211,7 @@ const EventsView: React.FC = () => {
     setEditingId(o.id);
     const itemsWithData = o.items.map(oi => {
       const inv = inventory.find(i => i.id === oi.itemId);
-      return { ...inv, quantity: oi.quantity, price: oi.priceAtBooking };
+      return { ...inv, quantity: oi.quantity, price: oi.priceAtBooking.toString() };
     });
     setSelectedItems(itemsWithData);
     setFormData({ ...o, warehouseExitNumber: o.warehouseExitNumber || '', paymentAmount: o.paidAmount });
@@ -145,54 +225,25 @@ const EventsView: React.FC = () => {
     setFormData(initialForm);
   };
 
-  const handleConfirmQuote = async (o: EventOrder) => {
-      if (await uiService.confirm("Confirmar Pedido", `¿Desea convertir la proforma #${o.orderNumber} en un pedido confirmado?`)) {
-          const ebNum = await uiService.prompt("Número de Egreso", "Ingrese el EB N° para este pedido (Opcional):");
-          const updated: EventOrder = {
-              ...o,
-              status: EventStatus.CONFIRMED,
-              warehouseExitNumber: ebNum ? parseInt(ebNum) : undefined
-          };
-          await storageService.saveEvent(updated);
-          uiService.alert("Confirmado", "Pedido creado satisfactoriamente.");
-      }
-  };
-
-  const handleCancelOrder = async (o: EventOrder) => {
-      if (await uiService.confirm("Anular", "¿Anular el registro?")) {
-          await storageService.saveEvent({...o, status: EventStatus.CANCELLED});
-      }
-  };
-
   const filteredData = orders.filter(o => {
     const matchesSearch = o.clientName.toLowerCase().includes(searchQuery.toLowerCase());
     if (activeTab === 'QUOTES') return matchesSearch && o.status === EventStatus.QUOTE;
     return matchesSearch && o.status !== EventStatus.QUOTE;
   });
 
+  const fin = calculateFinancials();
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-brand-950 uppercase">Gestión Comercial</h2>
-          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Pedidos y Presupuestos</p>
+          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Ventas y Presupuestos</p>
         </div>
         <div className="flex bg-zinc-100 p-1 rounded-2xl shadow-inner gap-1">
-            <button 
-                onClick={() => { setActiveTab('ORDERS'); resetForm(); }}
-                className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'ORDERS' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}
-            >
-                🛒 Pedidos
-            </button>
-            <button 
-                onClick={() => { setActiveTab('QUOTES'); resetForm(); }}
-                className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'QUOTES' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}
-            >
-                📝 Proformas
-            </button>
-            <button onClick={() => setView('FORM')} className="px-6 py-2 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg ml-2">
-                + Nuevo
-            </button>
+            <button onClick={() => { setActiveTab('ORDERS'); resetForm(); }} className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'ORDERS' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>🛒 Pedidos</button>
+            <button onClick={() => { setActiveTab('QUOTES'); resetForm(); }} className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'QUOTES' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>📝 Proformas</button>
+            <button onClick={() => setView('FORM')} className="px-6 py-2 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg ml-2">+ Nuevo</button>
         </div>
       </div>
 
@@ -208,29 +259,22 @@ const EventsView: React.FC = () => {
                   <span className="text-[7px] font-black text-zinc-300">#{o.status === EventStatus.QUOTE ? 'PRO' : 'ORD'}-{o.orderNumber}</span>
                   <span className={`px-1.5 py-0.5 rounded border text-[7px] font-black uppercase ${getStatusStyle(o.status)}`}>{o.status}</span>
                 </div>
-                <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate">{o.clientName}</h3>
+                <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate leading-tight">{o.clientName}</h3>
                 <p className="text-[8px] font-bold text-zinc-400 uppercase">🗓️ {o.executionDate}</p>
-                {o.warehouseExitNumber && <p className="text-[7px] font-black text-brand-600 mt-1 uppercase">EB N°: {o.warehouseExitNumber}</p>}
-                
                 <div className="mt-auto pt-3 flex flex-col gap-1">
-                  {o.status === EventStatus.QUOTE && (
-                      <button onClick={() => handleConfirmQuote(o)} className="w-full py-1.5 bg-emerald-600 text-white rounded-lg text-[8px] font-black uppercase">Confirmar Pedido</button>
-                  )}
-                  {o.status === EventStatus.CONFIRMED && (
-                      <button onClick={() => handleSendToDispatch(o)} className="w-full py-1.5 bg-brand-900 text-white rounded-lg text-[8px] font-black uppercase">🚚 Enviar a Despacho</button>
-                  )}
+                  <button onClick={() => handlePrintOrder(o)} className="w-full py-1.5 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase">🖨️ Imprimir</button>
+                  {o.status === EventStatus.CONFIRMED && <button onClick={() => handleSendToDispatch(o)} className="w-full py-1.5 bg-brand-900 text-white rounded-lg text-[8px] font-black uppercase">🚚 Despachar</button>}
                   <div className="flex gap-1">
-                      <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-100 text-zinc-600 rounded-lg text-[8px] font-black uppercase">Editar</button>
-                      <button onClick={() => handleCancelOrder(o)} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
+                      <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-50 text-zinc-600 rounded-lg text-[8px] font-black uppercase">Editar</button>
+                      <button onClick={() => { if(confirm("¿Anular?")) storageService.saveEvent({...o, status: EventStatus.CANCELLED}) }} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
                   </div>
                 </div>
               </div>
             ))}
-            {filteredData.length === 0 && <div className="col-span-full py-20 text-center opacity-20 font-black uppercase text-xs">Sin registros</div>}
           </div>
         </>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-20">
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-soft grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
@@ -240,19 +284,8 @@ const EventsView: React.FC = () => {
                       <option value="">Seleccionar...</option>
                       {clients.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
                     </select>
-                    <button 
-                        type="button" 
-                        onClick={() => setIsExpressModalOpen(true)}
-                        className="w-12 h-12 bg-brand-900 text-white rounded-xl flex items-center justify-center font-black text-lg shadow-md"
-                        title="Cliente Nuevo (Express)"
-                    >
-                        +
-                    </button>
+                    <button type="button" onClick={() => setIsExpressModalOpen(true)} className="w-12 h-12 bg-brand-900 text-white rounded-xl flex items-center justify-center font-black text-lg shadow-md">+</button>
                 </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase px-2">EB N° (Opcional)</label>
-                <input type="number" className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={formData.warehouseExitNumber} onChange={e => setFormData({...formData, warehouseExitNumber: e.target.value})} />
               </div>
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-400 uppercase px-2">Fecha Evento</label>
@@ -266,39 +299,36 @@ const EventsView: React.FC = () => {
                  <label className="text-[9px] font-black text-zinc-400 uppercase">¿Factura?</label>
                  <input type="checkbox" className="w-5 h-5" checked={formData.hasInvoice} onChange={e => setFormData({...formData, hasInvoice: e.target.checked})} />
               </div>
-              <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl">
+              <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl md:col-span-2">
                  <label className="text-[9px] font-black text-zinc-400 uppercase">¿Transporte?</label>
                  <input type="checkbox" className="w-5 h-5" checked={formData.requiresDelivery} onChange={e => setFormData({...formData, requiresDelivery: e.target.checked})} />
+                 {formData.requiresDelivery && <input type="number" placeholder="Costo Envío $" className="flex-1 h-10 bg-white rounded-lg px-4 text-xs font-bold border" value={formData.deliveryCost} onChange={e => setFormData({...formData, deliveryCost: e.target.value})} />}
               </div>
-              {formData.requiresDelivery && (
-                <>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-400 uppercase px-2">Costo Envío $</label>
-                    <input type="number" className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={formData.deliveryCost} onChange={e => setFormData({...formData, deliveryCost: e.target.value})} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-zinc-400 uppercase px-2">Dirección Entrega</label>
-                    <input type="text" className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={formData.deliveryAddress} onChange={e => setFormData({...formData, deliveryAddress: e.target.value})} />
-                  </div>
-                </>
-              )}
             </div>
+
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-soft">
-              <h3 className="text-[10px] font-black text-zinc-400 uppercase mb-4 px-2 tracking-widest">Detalle de Selección</h3>
+              <h3 className="text-[10px] font-black text-zinc-400 uppercase mb-4 px-2 tracking-widest">Items Seleccionados (Edite el precio si es necesario)</h3>
               <div className="space-y-2">
                 {selectedItems.map(item => (
-                  <div key={item.id} className="flex items-center gap-4 bg-zinc-50 p-3 rounded-2xl border border-zinc-100">
+                  <div key={item.id} className="flex items-center gap-4 bg-zinc-50 p-3 rounded-2xl border border-zinc-100 group">
                     <div className="flex-1">
                       <p className="text-[10px] font-black uppercase text-zinc-950">{item.name}</p>
-                      <p className="text-[8px] font-bold text-zinc-400">$ {item.price.toFixed(2)}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[8px] font-bold text-zinc-400">P. Unit: $</span>
+                          <input type="number" step="0.01" className="w-20 h-7 bg-white border border-zinc-200 rounded px-2 text-[9px] font-black" value={item.price} onChange={e => setSelectedItems(selectedItems.map(si => si.id === item.id ? {...si, price: e.target.value} : si))} />
+                      </div>
                     </div>
-                    <input type="number" className="w-16 h-8 bg-white border border-zinc-200 rounded-lg text-center text-xs font-black" value={item.quantity} onChange={e => setSelectedItems(selectedItems.map(si => si.id === item.id ? {...si, quantity: parseInt(e.target.value)} : si))} />
-                    <button onClick={() => setSelectedItems(selectedItems.filter(si => si.id !== item.id))} className="text-rose-300">✕</button>
+                    <div className="flex items-center gap-3">
+                        <label className="text-[8px] font-black text-zinc-400 uppercase">Cant:</label>
+                        <input type="number" className="w-16 h-8 bg-white border border-zinc-200 rounded-lg text-center text-xs font-black" value={item.quantity} onChange={e => setSelectedItems(selectedItems.map(si => si.id === item.id ? {...si, quantity: parseInt(e.target.value)} : si))} />
+                    </div>
+                    <button onClick={() => setSelectedItems(selectedItems.filter(si => si.id !== item.id))} className="text-rose-300 hover:text-rose-500">✕</button>
                   </div>
                 ))}
               </div>
             </div>
           </div>
+
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-soft space-y-4">
               <input type="text" placeholder="🔍 Buscar catálogo..." className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-[10px] font-bold" value={itemSearch} onChange={e => setItemSearch(e.target.value)} />
@@ -311,30 +341,34 @@ const EventsView: React.FC = () => {
                 ))}
               </div>
             </div>
-            <div className="bg-zinc-900 text-white p-8 rounded-[2.5rem] shadow-xl space-y-6">
-              <div className="flex gap-2">
-                <input type="number" placeholder="Desc." className="flex-1 bg-white/10 rounded-lg h-10 px-3 text-xs font-black" value={formData.discountValue} onChange={e => setFormData({...formData, discountValue: parseFloat(e.target.value) || 0})} />
-                <select className="bg-white/10 rounded-lg h-10 px-2 text-[10px] font-black" value={formData.discountType} onChange={e => setFormData({...formData, discountType: e.target.value})}>
-                   <option value="VALUE">$</option><option value="PERCENT">%</option>
-                </select>
+
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-premium border border-zinc-100 space-y-4">
+              <h3 className="text-xs font-black text-zinc-400 uppercase tracking-[0.2em] mb-4 text-center">Resumen Financiero</h3>
+              <div className="space-y-3 text-[10px] font-bold text-zinc-600 uppercase">
+                  <div className="flex justify-between"><span>Subtotal Bruto</span><span>$ {fin.subtotal.toFixed(2)}</span></div>
+                  <div className="flex justify-between items-center gap-4">
+                      <span>Descuento Aplicado</span>
+                      <div className="flex gap-1 h-8">
+                          <input type="number" className="w-16 bg-zinc-50 border rounded px-2" value={formData.discountValue} onChange={e => setFormData({...formData, discountValue: e.target.value})} />
+                          <select className="bg-zinc-50 border rounded text-[8px]" value={formData.discountType} onChange={e => setFormData({...formData, discountType: e.target.value})}><option value="VALUE">$</option><option value="PERCENT">%</option></select>
+                      </div>
+                  </div>
+                  <div className="flex justify-between"><span>Transporte</span><span>$ {fin.delivery.toFixed(2)}</span></div>
+                  <div className="flex justify-between border-t pt-3 font-black text-brand-900 text-lg">
+                      <span>TOTAL A PAGAR</span>
+                      <span>$ {fin.total.toFixed(2)}</span>
+                  </div>
               </div>
-              <div className="flex justify-between items-center border-b border-white/10 pb-4">
-                <span className="text-[10px] font-black uppercase opacity-50">Total</span>
-                <span className="text-3xl font-black tracking-tighter">$ {calculateTotal().toFixed(2)}</span>
+              <div className="grid grid-cols-2 gap-2 pt-4">
+                  <button onClick={() => handleSave(true)} className="py-4 bg-zinc-100 text-brand-900 rounded-xl font-black uppercase text-[8px] tracking-widest border border-zinc-200">💾 Guardar Proforma</button>
+                  <button onClick={() => handleSave(false)} className="py-4 bg-brand-900 text-white rounded-xl font-black uppercase text-[8px] tracking-widest shadow-lg">🚀 Confirmar Pedido</button>
               </div>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => handleSave(true)} className="py-4 bg-white/10 text-white rounded-xl font-black uppercase text-[8px] tracking-widest border border-white/10">💾 Proforma</button>
-                    <button onClick={() => handleSave(false)} className="py-4 bg-brand-600 text-white rounded-xl font-black uppercase text-[8px] tracking-widest">🚀 Pedido</button>
-                </div>
-                <button onClick={resetForm} className="w-full py-2 text-zinc-500 font-black uppercase text-[8px]">Cancelar</button>
-              </div>
+              <button onClick={resetForm} className="w-full py-2 text-zinc-300 font-black uppercase text-[8px]">Cancelar y Salir</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Express Client Modal */}
       {isExpressModalOpen && (
           <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-md flex items-center justify-center p-4 z-[200] animate-fade-in">
               <div className="bg-white rounded-[2rem] shadow-premium p-8 w-full max-w-sm border border-white animate-slide-up">
@@ -342,31 +376,7 @@ const EventsView: React.FC = () => {
                   <div className="space-y-4">
                       <div>
                           <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Nombre / Razón Social *</label>
-                          <input 
-                              autoFocus
-                              type="text" 
-                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
-                              value={expressClientData.name}
-                              onChange={e => setExpressClientData({...expressClientData, name: e.target.value})}
-                          />
-                      </div>
-                      <div>
-                          <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Identificación (C.I. / RUC)</label>
-                          <input 
-                              type="text" 
-                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
-                              value={expressClientData.documentId}
-                              onChange={e => setExpressClientData({...expressClientData, documentId: e.target.value})}
-                          />
-                      </div>
-                      <div>
-                          <label className="text-[8px] font-black text-zinc-400 uppercase px-2 mb-1 block">Celular de Contacto</label>
-                          <input 
-                              type="text" 
-                              className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none"
-                              value={expressClientData.mobilePhone}
-                              onChange={e => setExpressClientData({...expressClientData, mobilePhone: e.target.value})}
-                          />
+                          <input autoFocus type="text" className="w-full h-12 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none" value={expressClientData.name} onChange={e => setExpressClientData({...expressClientData, name: e.target.value})} />
                       </div>
                       <div className="flex gap-2 pt-4">
                           <button onClick={() => setIsExpressModalOpen(false)} className="flex-1 py-3 text-zinc-400 font-black uppercase text-[8px]">Cancelar</button>
