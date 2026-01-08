@@ -26,18 +26,15 @@ const Layout: React.FC<LayoutProps> = ({
     canGoBack 
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [companyName, setCompanyName] = useState(COMPANY_NAME);
   const [companyLogo, setCompanyLogo] = useState(COMPANY_LOGO);
   const [globalModal, setGlobalModal] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [cloudStatus, setCloudStatus] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE');
 
   useEffect(() => {
     const unsubUi = uiService.subscribe(setGlobalModal);
     const unsubNotif = storageService.subscribeToNotifications(data => {
-        setNotifications(data);
         setUnreadCount(data.filter(n => !n.isRead).length);
     });
     const unsubSettings = storageService.subscribeToSettings(settings => {
@@ -47,33 +44,16 @@ const Layout: React.FC<LayoutProps> = ({
         }
     });
 
-    // Verificar estado de conexión
-    setCloudStatus(storageService.isCloudConnected() ? 'ONLINE' : 'OFFLINE');
-
     const handleBeforeInstall = (e: any) => {
         e.preventDefault();
         setDeferredPrompt(e);
     };
-    
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-        setDeferredPrompt(null);
-    }
-
-    return () => { 
-        unsubUi(); 
-        unsubNotif(); 
-        unsubSettings(); 
-        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-    };
+    return () => { unsubUi(); unsubNotif(); unsubSettings(); window.removeEventListener('beforeinstallprompt', handleBeforeInstall); };
   }, []);
 
   const handleInstallApp = async () => {
-      if (!deferredPrompt) {
-          uiService.alert("Instalación", "Si estás en iOS: Toca 'Compartir' y luego 'Añadir a pantalla de inicio'.");
-          return;
-      }
+      if (!deferredPrompt) return;
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') setDeferredPrompt(null);
@@ -84,125 +64,93 @@ const Layout: React.FC<LayoutProps> = ({
       setGlobalModal(null);
   };
 
+  // RESTRICCIONES DE ROLES SEGÚN SOLICITUD
   const menuItems = [
-    { id: 'dashboard', label: 'Inicio', icon: '📊', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
-    { id: 'events', label: 'Pedidos', icon: '📅', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
+    { id: 'dashboard', label: 'Dashboard', icon: '📊', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
     { id: 'quotes', label: 'Proformas', icon: '📝', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
-    { id: 'inventory', label: 'Catálogo', icon: '🪑', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
+    { id: 'events', label: 'Pedidos', icon: '📅', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
     { id: 'dispatch', label: 'Logística', icon: '🚚', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
     { id: 'returns', label: 'Retornos', icon: '📥', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
-    { id: 'purchases', label: 'Compras', icon: '🛒', roles: [UserRole.SUPER_ADMIN] },
-    { id: 'accounting', label: 'Contabilidad', icon: '🏛️', roles: [UserRole.SUPER_ADMIN] },
-    { id: 'invoicing', label: 'Facturación', icon: '🧾', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
     { id: 'payments', label: 'Caja', icon: '💲', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
+    { id: 'inventory', label: 'Catálogo', icon: '🪑', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
     { id: 'clients', label: 'Directorio', icon: '👥', roles: [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.STAFF] },
-    { id: 'reports', label: 'Reportes', icon: '📈', roles: [UserRole.SUPER_ADMIN] },
-    { id: 'users', label: 'Equipo', icon: '🔐', roles: [UserRole.SUPER_ADMIN] },
+    // Módulos Críticos (Solo Super Admin)
+    { id: 'purchases', label: 'Egresos', icon: '🛒', roles: [UserRole.SUPER_ADMIN] },
+    { id: 'accounting', label: 'Contabilidad', icon: '🏛️', roles: [UserRole.SUPER_ADMIN] },
+    { id: 'reports', label: 'Reportes Gen.', icon: '📈', roles: [UserRole.SUPER_ADMIN] },
+    { id: 'users', label: 'Usuarios', icon: '🔐', roles: [UserRole.SUPER_ADMIN] },
     { id: 'settings', label: 'Ajustes', icon: '⚙️', roles: [UserRole.SUPER_ADMIN] },
   ];
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(user.role));
 
   return (
-    <div className="min-h-screen flex bg-[#FDFDFD]">
-      {isSidebarOpen && <div className="fixed inset-0 bg-zinc-900/10 backdrop-blur-sm z-[60] md:hidden" onClick={() => setIsSidebarOpen(false)} />}
+    <div className="min-h-screen flex bg-[#FAF9F6] flex-col md:flex-row">
+      {isSidebarOpen && <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60] md:hidden" onClick={() => setIsSidebarOpen(false)} />}
       
-      <aside className={`no-print fixed md:sticky top-0 left-0 h-screen z-[70] w-64 bg-white border-r border-zinc-100 transition-all duration-500 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col shadow-sm`}>
+      <aside className={`no-print fixed md:sticky top-0 left-0 h-screen z-[70] w-64 bg-white border-r border-zinc-100 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col shadow-sm`}>
         <div className="p-8 flex flex-col items-center text-center">
-          <div className="w-12 h-12 bg-zinc-50 rounded-2xl mb-4 p-2 flex items-center justify-center overflow-hidden border border-zinc-50 shadow-inner">
+          <div className="w-14 h-14 bg-zinc-50 rounded-2xl mb-4 p-2 flex items-center justify-center border border-zinc-100 shadow-inner">
              <img src={companyLogo} alt="Logo" className="w-full h-full object-contain" />
           </div>
-          <h2 className="text-brand-900 text-sm font-extrabold tracking-tighter leading-none uppercase">{companyName}</h2>
-          <span className="text-[8px] text-zinc-300 mt-2 font-black tracking-widest uppercase">Admin Suite v{APP_VERSION}</span>
+          <h2 className="text-brand-900 text-xs font-black tracking-tighter uppercase leading-none">{companyName}</h2>
+          <span className="text-[7px] text-zinc-300 mt-2 font-black tracking-[0.3em] uppercase">Logistik Pro v{APP_VERSION}</span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-2 space-y-0.5 px-4 scrollbar-hide">
-          {filteredMenu.map((item) => {
-            const isActive = currentView === item.id;
-            return (
-              <button 
-                key={item.id}
-                onClick={() => { onNavigate(item.id); setIsSidebarOpen(false); }} 
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${isActive ? 'bg-zinc-50 text-brand-900 font-bold' : 'text-zinc-400 hover:bg-zinc-50/50 hover:text-zinc-600'}`}
-              >
-                <span className={`text-lg transition-transform duration-300 ${isActive ? 'scale-105' : 'grayscale opacity-50 group-hover:opacity-100'}`}>{item.icon}</span>
-                <span className="text-[10px] font-bold tracking-widest uppercase">{item.label}</span>
-              </button>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto px-4 space-y-1 scrollbar-hide">
+          {filteredMenu.map((item) => (
+            <button 
+              key={item.id}
+              onClick={() => { onNavigate(item.id); setIsSidebarOpen(false); }} 
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${currentView === item.id ? 'bg-brand-900 text-white shadow-lg' : 'text-zinc-400 hover:bg-zinc-50'}`}
+            >
+              <span className="text-lg">{item.icon}</span>
+              <span className="text-[10px] font-black tracking-widest uppercase">{item.label}</span>
+            </button>
+          ))}
         </nav>
 
-        <div className="p-6 bg-zinc-50/30 border-t border-zinc-50 space-y-3">
-           <div className="flex items-center justify-between px-2 mb-2">
-              <span className="text-[7px] font-black text-zinc-400 uppercase tracking-widest">Sincronización</span>
-              <div className="flex items-center gap-1.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${cloudStatus === 'ONLINE' ? 'bg-emerald-500 animate-pulse' : 'bg-orange-400'}`}></div>
-                  <span className={`text-[7px] font-black uppercase ${cloudStatus === 'ONLINE' ? 'text-emerald-600' : 'text-orange-500'}`}>{cloudStatus}</span>
-              </div>
-           </div>
-
+        <div className="p-6 border-t border-zinc-50 space-y-3">
            {deferredPrompt && (
-              <button onClick={handleInstallApp} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[9px] font-black transition-all duration-300 uppercase tracking-widest shadow-lg flex items-center justify-center gap-2">
+              <button onClick={handleInstallApp} className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md flex items-center justify-center gap-2">
                 <span>📲</span> Instalar App
               </button>
            )}
-
-           <div className="flex items-center gap-3 mb-4 px-1">
-              <div className="w-8 h-8 rounded-xl bg-zinc-200 flex items-center justify-center text-[10px] font-black text-zinc-600 uppercase">
-                {user.name.charAt(0)}
-              </div>
-              <div className="overflow-hidden">
-                <p className="text-[10px] font-black text-zinc-800 truncate uppercase">{user.name.split(' ')[0]}</p>
-                <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-tighter">{user.role === UserRole.SUPER_ADMIN ? 'Gerencia' : 'Operaciones'}</p>
-              </div>
-           </div>
-           <button onClick={onLogout} className="w-full py-2.5 bg-white border border-zinc-200 hover:border-red-100 hover:text-red-500 text-zinc-400 rounded-xl text-[9px] font-black transition-all duration-300 uppercase tracking-widest shadow-sm">Cerrar Sesión</button>
+           <button onClick={onLogout} className="w-full py-3 bg-zinc-50 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest border border-zinc-100 hover:text-rose-500">Cerrar Sesión</button>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="no-print h-16 bg-white/80 backdrop-blur-xl border-b border-zinc-100 sticky top-0 z-50 flex items-center justify-between px-6 md:px-10">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        <header className="no-print h-16 bg-white/80 backdrop-blur-md border-b border-zinc-100 flex items-center justify-between px-6 shrink-0">
+          <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 bg-zinc-50 rounded-xl text-zinc-400">☰</button>
           <div className="flex items-center gap-4">
-             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 bg-zinc-50 rounded-xl text-zinc-400 active:scale-95 transition-transform">☰</button>
-             {canGoBack && (
-               <button onClick={() => window.history.back()} className="hidden md:flex items-center gap-2 text-zinc-300 hover:text-brand-900 transition-colors">
-                  <span className="text-xl">←</span>
-                  <span className="text-[9px] font-black uppercase tracking-widest">Regresar</span>
-               </button>
-             )}
+            <h1 className="text-[10px] font-black uppercase text-brand-900 tracking-widest hidden sm:block">{filteredMenu.find(m => m.id === currentView)?.label}</h1>
           </div>
-          
           <div className="flex items-center gap-3">
-             <button className="p-2 bg-zinc-50 hover:bg-zinc-100 border border-zinc-100 rounded-xl text-zinc-300 transition-all relative">
-                <span>🔔</span>
-                {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-600 text-white text-[8px] font-black rounded-full flex items-center justify-center border-2 border-white">{unreadCount}</span>}
-             </button>
-             {onHome && <button onClick={onHome} className="bg-brand-900 text-white px-4 py-2 rounded-xl font-bold text-[9px] uppercase tracking-[0.2em] hover:bg-brand-800 transition-all shadow-sm active:scale-95">Ir al Panel</button>}
+             <div className="w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center text-[10px] font-black text-brand-900 border border-brand-100">
+                {user.name.charAt(0)}
+             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden">
-          <div className="animate-fade-in h-full overflow-y-auto">
-            {children}
-          </div>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 scrollbar-hide">
+          {children}
         </main>
       </div>
 
       {globalModal && (
-          <div className="fixed inset-0 bg-zinc-900/10 backdrop-blur-sm z-[200] flex items-center justify-center p-6 no-print animate-fade-in">
-              <div className="bg-white rounded-[2.5rem] shadow-premium w-full max-w-sm p-10 text-center animate-slide-up border border-white">
-                  <div className="w-16 h-16 bg-zinc-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                      <span className="text-3xl">{globalModal.type === 'CONFIRM' ? '❓' : '💡'}</span>
-                  </div>
-                  <h3 className="text-lg font-black text-brand-900 mb-2 tracking-tight leading-none uppercase">{globalModal.title}</h3>
-                  <p className="text-zinc-400 text-xs mb-8 leading-relaxed px-2 font-bold uppercase tracking-tight">{globalModal.message}</p>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[200] flex items-center justify-center p-6 animate-fade-in no-print">
+              <div className="bg-white rounded-[2.5rem] shadow-premium w-full max-w-sm p-10 text-center animate-slide-up">
+                  <div className="text-4xl mb-6">{globalModal.type === 'CONFIRM' ? '❓' : '💡'}</div>
+                  <h3 className="text-lg font-black text-brand-900 uppercase mb-2">{globalModal.title}</h3>
+                  <p className="text-zinc-400 text-[10px] mb-8 font-bold uppercase tracking-tight leading-relaxed">{globalModal.message}</p>
                   <div className="flex flex-col gap-2">
-                      <button onClick={() => handleModalResolve(true)} className="w-full py-4 bg-brand-900 text-white rounded-2xl font-black shadow-lg hover:bg-brand-800 transition-all active:scale-95 uppercase text-[9px] tracking-widest">
-                          {globalModal.confirmText || 'Entendido'}
+                      <button onClick={() => handleModalResolve(true)} className="w-full py-4 bg-brand-900 text-white rounded-2xl font-black shadow-lg uppercase text-[9px] tracking-widest">
+                          {globalModal.confirmText || 'Aceptar'}
                       </button>
                       {globalModal.type !== 'ALERT' && (
-                          <button onClick={() => handleModalResolve(false)} className="w-full py-3 text-zinc-300 font-bold hover:text-zinc-500 transition-colors uppercase text-[8px] tracking-widest">
-                              {globalModal.cancelText || 'Cancelar'}
+                          <button onClick={() => handleModalResolve(false)} className="w-full py-3 text-zinc-300 font-bold uppercase text-[8px]">
+                              {globalModal.cancelText || 'Cerrar'}
                           </button>
                       )}
                   </div>

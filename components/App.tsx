@@ -96,7 +96,7 @@ const App: React.FC = () => {
       case 'payments': return <PaymentsView />;
       case 'clients': return <ClientView />;
       case 'bajas': return (role === UserRole.SUPER_ADMIN || role === UserRole.ADMIN) ? <WriteOffsView /> : <AccessDenied />;
-      case 'reports': return role === UserRole.SUPER_ADMIN ? <ReportsView /> : <AccessDenied />;
+      case 'reports': return role === UserRole.SUPER_ADMIN ? <ReportsView onNavigate={handleNavigate} /> : <AccessDenied />;
       case 'users': return role === UserRole.SUPER_ADMIN ? <UserView /> : <AccessDenied />;
       case 'settings': return role === UserRole.SUPER_ADMIN ? <SettingsView /> : <AccessDenied />;
       default: return <Dashboard />;

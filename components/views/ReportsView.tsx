@@ -4,7 +4,11 @@ import { EventOrder, Client, EventStatus, User, PaymentTransaction } from '../..
 import { storageService } from '../../services/storageService';
 import { COMPANY_LOGO, COMPANY_NAME } from '../../constants';
 
-const ReportsView: React.FC = () => {
+interface ReportsViewProps {
+  onNavigate?: (view: string) => void;
+}
+
+const ReportsView: React.FC<ReportsViewProps> = ({ onNavigate }) => {
   const [events, setEvents] = useState<EventOrder[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<EventOrder[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<PaymentTransaction[]>([]);
@@ -134,6 +138,13 @@ const ReportsView: React.FC = () => {
     return 'HISTÓRICO TOTAL';
   };
 
+  const handleGoToOrder = (orderId: string) => {
+    if (onNavigate) {
+      localStorage.setItem('logistik_goto_order', orderId);
+      onNavigate('events');
+    }
+  };
+
   return (
     <div className="space-y-6 flex flex-col animate-fade-in pb-10">
       <div className="flex flex-col md:flex-row justify-between items-end gap-4">
@@ -200,17 +211,27 @@ const ReportsView: React.FC = () => {
                 <th className="px-8 py-5 text-right">Monto</th>
                 <th className="px-8 py-5 text-right">Abonos</th>
                 <th className="px-8 py-5 text-right">Saldo</th>
+                <th className="px-8 py-5 text-center">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
               {filteredEvents.map(e => (
-                <tr key={e.id} className="hover:bg-zinc-50 transition-colors">
+                <tr key={e.id} className="hover:bg-zinc-50 transition-colors group">
                   <td className="px-8 py-4 font-mono text-[10px] font-black text-zinc-400">#ORD-${e.orderNumber}</td>
                   <td className="px-8 py-4 text-[10px] font-bold text-zinc-500 uppercase">{e.executionDate}</td>
                   <td className="px-8 py-4 text-[10px] font-black text-zinc-800 uppercase">{e.clientName}</td>
                   <td className="px-8 py-4 text-[10px] font-black text-zinc-900 text-right">$ {e.total.toFixed(2)}</td>
                   <td className="px-8 py-4 text-[10px] font-black text-emerald-600 text-right">$ {e.paidAmount.toFixed(2)}</td>
                   <td className={`px-8 py-4 text-[11px] font-black text-right ${(e.total - e.paidAmount) > 0.05 ? 'text-rose-600' : 'text-emerald-600'}`}>$ {(e.total - e.paidAmount).toFixed(2)}</td>
+                  <td className="px-8 py-4 text-center">
+                    <button 
+                      onClick={() => handleGoToOrder(e.id)}
+                      className="w-8 h-8 bg-zinc-50 text-zinc-400 rounded-lg flex items-center justify-center hover:bg-brand-900 hover:text-white transition-all shadow-sm active:scale-90"
+                      title="Ver Detalles de Venta"
+                    >
+                      👁️
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

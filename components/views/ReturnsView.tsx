@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus, Client } from '../../types';
+import { EventOrder, EventStatus } from '../../types';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
 
@@ -8,8 +8,8 @@ const ReturnsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    const unsubEvents = storageService.subscribeToEvents((all) => {
-        // VISIBILIDAD: Se incluyen todos los estados de pedidos que están fuera de bodega
+    const unsub = storageService.subscribeToEvents((all) => {
+        // VISIBILIDAD ROBUSTA: Incluye todos los estados de pedidos que están fuera de bodega
         const relevant = all.filter(e => {
             const s = String(e.status).toUpperCase();
             return s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO' || 
@@ -20,39 +20,36 @@ const ReturnsView: React.FC = () => {
         relevant.sort((a,b) => b.executionDate.localeCompare(a.executionDate));
         setEvents(relevant);
     });
-    return () => unsubEvents();
+    return () => unsub();
   }, []);
 
-  const filteredEvents = events.filter(e => 
-      e.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      String(e.orderNumber).includes(searchQuery)
-  );
-
   return (
-    <div className="h-full flex flex-col space-y-6 animate-fade-in">
-      <h2 className="text-xl font-black text-brand-900 uppercase tracking-tighter">Módulo de Retornos</h2>
-      <div className="bg-white p-4 rounded-[1.5rem] shadow-premium border border-zinc-100 mb-6">
+    <div className="h-full flex flex-col space-y-6 animate-fade-in p-2 md:p-6">
+      <h2 className="text-2xl font-black text-brand-900 uppercase tracking-tighter">Retorno de Mobiliario</h2>
+      <div className="bg-white p-4 rounded-3xl shadow-soft border border-zinc-100 mb-6">
         <div className="relative">
-            <input className="w-full border-none p-3 pl-12 rounded-xl text-sm font-bold bg-zinc-50 focus:ring-4 focus:ring-brand-50 outline-none" placeholder="Buscar pedido para retirar..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 grayscale opacity-30">🔍</span>
+            <input className="w-full border-none p-3 pl-12 rounded-xl text-xs font-bold bg-zinc-50 focus:ring-4 focus:ring-brand-50 outline-none" placeholder="Buscar pedido por nombre o número..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 grayscale opacity-30 text-xl">🔍</span>
         </div>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 pb-20">
-        {filteredEvents.map(event => {
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
+        {events.filter(e => e.clientName.toLowerCase().includes(searchQuery.toLowerCase())).map(event => {
             const s = String(event.status).toUpperCase();
-            const statusLabel = (s === 'WITH_ISSUES' || s === 'NOVEDADES') ? 'Novedades' : 'Despachado';
-            const statusColor = (s === 'WITH_ISSUES' || s === 'NOVEDADES') ? 'text-red-500' : 'text-orange-400';
+            const hasIssues = s === 'WITH_ISSUES' || s === 'NOVEDADES';
 
             return (
-                <div key={event.id} className="bg-white p-3 rounded-[1rem] shadow-soft border-t-2 border-brand-900 flex flex-col hover:shadow-premium transition-all">
-                    <span className="font-mono font-black text-zinc-300 text-[7px]">#ORD-${event.orderNumber}</span>
-                    <h3 className="text-[9px] font-black text-zinc-950 truncate uppercase my-1">{event.clientName}</h3>
-                    <span className={`text-[7px] font-bold uppercase mb-2 ${statusColor}`}>{statusLabel}</span>
-                    <button className="mt-auto w-full py-1.5 bg-zinc-900 text-white font-black text-[7px] uppercase rounded-lg shadow-md active:scale-95">Procesar Retiro</button>
+                <div key={event.id} className="bg-white p-6 rounded-[2rem] shadow-soft border-t-8 border-brand-950 flex flex-col hover:shadow-premium transition-all">
+                    <div className="flex justify-between items-center mb-4">
+                        <span className="font-mono font-black text-zinc-300 text-[10px]">#ORD-{event.orderNumber}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${hasIssues ? 'bg-rose-50 text-rose-600' : 'bg-orange-50 text-orange-600'}`}>{hasIssues ? 'Novedades' : 'En Campo'}</span>
+                    </div>
+                    <h3 className="text-xs font-black text-zinc-950 truncate uppercase mb-1">{event.clientName}</h3>
+                    <p className="text-[9px] font-bold text-zinc-400 uppercase mb-6 tracking-widest">🗓️ {event.executionDate}</p>
+                    <button className="mt-auto w-full py-3 bg-zinc-950 text-white font-black text-[10px] uppercase rounded-xl shadow-lg active:scale-95 transition-all">Procesar Ingreso</button>
                 </div>
             );
         })}
-        {filteredEvents.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros por recuperar</div>}
+        {events.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros por recuperar</div>}
       </div>
     </div>
   );
