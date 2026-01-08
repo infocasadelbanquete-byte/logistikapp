@@ -1,3 +1,4 @@
+
 export enum UserRole {
   SUPER_ADMIN = 'SUPER_ADMIN',
   ADMIN = 'ADMIN',
@@ -14,9 +15,7 @@ export interface User {
   role: UserRole;
   status?: UserStatus;
   lastActive?: string;
-  // Added properties for security and locking
-  isLocked?: boolean;
-  failedLoginAttempts?: number;
+  isLocked?: boolean; // Required for security alerts
 }
 
 export interface Client {
@@ -31,12 +30,7 @@ export interface Client {
 }
 
 export type InventoryType = 'PRODUCT' | 'SERVICE';
-
-// Added PresentationType enum
-export enum PresentationType {
-  UNIT = 'UNIT',
-  BOX = 'BOX'
-}
+export type PresentationType = 'UNIT' | 'BOX'; // Added for inventory management
 
 export interface InventoryItem {
   id: string;
@@ -49,9 +43,8 @@ export interface InventoryItem {
   type: InventoryType;
   images: string[];
   code?: string;
-  // Added properties for inventory management
-  presentationType?: PresentationType | 'UNIT' | 'BOX';
-  quantityPerBox?: number;
+  presentationType?: PresentationType; // Added to fix InventoryView errors
+  quantityPerBox?: number; // Added to fix InventoryView errors
 }
 
 export enum EventStatus {
@@ -59,11 +52,12 @@ export enum EventStatus {
   CONFIRMED = 'CONFIRMADO',
   DISPATCHED = 'DESPACHADO',
   DELIVERED = 'ENTREGADO',
-  PARTIAL_RETURN = 'RETIRO PARCIAL',
+  IN_PROGRESS = 'EN DESARROLLO',
+  TO_PICKUP = 'POR RETIRAR',
+  PARTIAL_RETURN = 'INGRESO PARCIAL',
   FINISHED = 'FINALIZADO',
-  CANCELLED = 'CANCELLED',
-  // Added RETURNED as used in ClientView.tsx
-  RETURNED = 'RETORNADO'
+  CANCELLED = 'CANCELADO',
+  RETURNED = 'RETORNADO' // Added to fix ClientView errors
 }
 
 export enum PaymentStatus {
@@ -85,12 +79,12 @@ export interface PaymentTransaction {
   date: string;
   amount: number;
   method: PaymentMethod;
+  bankName?: string;
+  checkNumber?: string;
+  accountNumber?: string;
   recordedBy: string;
   orderNumber: number;
-  // Added properties for payment management
   isVoid?: boolean;
-  voidReason?: string;
-  bankName?: string;
 }
 
 export interface EventOrder {
@@ -99,7 +93,8 @@ export interface EventOrder {
   clientId: string;
   clientName: string;
   orderDate: string;
-  executionDate: string; 
+  executionDate: string;
+  endDate?: string;
   status: EventStatus;
   paymentStatus: PaymentStatus;
   paidAmount: number;
@@ -110,36 +105,20 @@ export interface EventOrder {
   deliveryAddress?: string;
   hasInvoice?: boolean;
   rentalDays?: number;
-  discountPercentage?: number;
+  discountValue?: number;
   discountType?: 'PERCENT' | 'VALUE';
   notes?: string;
   returnNotes?: string;
-  transactions?: PaymentTransaction[];
-  // Added properties for accounting and invoicing
   withheldAmount?: number;
-  invoiceGenerated?: boolean;
-  invoiceNumber?: string;
+  transactions?: PaymentTransaction[];
+  invoiceNumber?: string; // Added for InvoicingView
+  invoiceGenerated?: boolean; // Added for InvoicingView
 }
 
-export interface AuthState {
-  user: User | null;
-  isAuthenticated: boolean;
-}
-
-// Added missing interfaces used in storageService and other views
-
-export interface AppNotification {
-  id: string;
-  message: string;
-  date: string;
-  type: 'INFO' | 'SUCCESS' | 'WARNING';
-  isRead: boolean;
-}
-
-export interface CompanySettings {
-  name: string;
-  slogan: string;
-  logoUrl: string;
+export enum PurchaseDocType {
+  INVOICE = 'FACTURA',
+  RECEIPT = 'NOTA DE VENTA',
+  LIQUIDATION = 'LIQUIDACION'
 }
 
 export interface Provider {
@@ -151,20 +130,17 @@ export interface Provider {
   email?: string;
 }
 
-export enum PurchaseDocType {
-  INVOICE = 'FACTURA',
-  RECEIPT = 'NOTA DE VENTA',
-  LIQUIDATION = 'LIQUIDACION DE COMPRA'
-}
-
 export interface PurchaseTransaction {
   id: string;
   date: string;
-  provider: Provider;
-  details: string;
-  docType: PurchaseDocType;
+  providerName: string;
+  providerId: string;
   docNumber: string;
-  values: {
+  total: number;
+  details: string;
+  provider: Provider; // Required for PurchasesView
+  docType: PurchaseDocType; // Required for PurchasesView
+  values: { // Required for PurchasesView
     subtotal15: number;
     subtotal0: number;
     subtotalRise: number;
@@ -172,7 +148,7 @@ export interface PurchaseTransaction {
     vat15: number;
     total: number;
   };
-  payment: {
+  payment: { // Required for PurchasesView
     method: string;
     bank?: string;
     institution?: string;
@@ -181,28 +157,35 @@ export interface PurchaseTransaction {
   };
 }
 
+export interface WithholdingLine {
+  type: 'IVA' | 'RENTA';
+  percentage: number;
+  amount: number;
+}
+
 export interface Withholding {
   id: string;
   date: string;
   docNumber: string;
-  type: 'IVA' | 'RENTA';
-  percentage: number;
-  amount: number;
   clientId: string;
   beneficiary: string;
   relatedOrderId: string;
-  relatedDocNumber: string;
+  lines: WithholdingLine[];
+  amount: number;
 }
 
 export interface PayrollEntry {
   id: string;
+  month: string;
   date: string;
-  period: string;
+  employeeName: string;
   salaries: number;
-  overtime: number;
-  iess: number;
-  bonuses: number;
-  extraPay: number;
-  totalDeductions: number;
+  suplementaryHours: number;
+  extraHours: number;
   netPaid: number;
+}
+
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
 }

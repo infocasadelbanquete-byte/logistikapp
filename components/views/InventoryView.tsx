@@ -181,6 +181,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
             id: editingItem ? editingItem.id : '' 
         } as InventoryItem;
         
+        // Corrected method name to saveInventoryItem
         await storageService.saveInventoryItem(itemToSave);
         
         if (editingItem) {
@@ -225,6 +226,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ role }) => {
 
   const handleDeleteItem = async (item: InventoryItem) => {
       if (await uiService.confirm("Baja Definitiva", `¿Desea remover "${item.name}" del catálogo? Esta acción no se puede revertir.`)) {
+          // Corrected method name to deleteInventoryItem
           await storageService.deleteInventoryItem(item.id);
           await uiService.alert("Eliminado", "El artículo ha sido removido del sistema.");
       }

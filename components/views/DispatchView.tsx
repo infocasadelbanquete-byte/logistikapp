@@ -1,135 +1,79 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus, PaymentMethod } from '../../types';
+import { EventOrder, EventStatus } from '../../types';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
 
 const DispatchView: React.FC = () => {
   const [orders, setOrders] = useState<EventOrder[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'LOGISTICA' | 'RETIROS' | 'ARCHIVO'>('LOGISTICA');
-  const [selectedOrder, setSelectedOrder] = useState<EventOrder | null>(null);
-  const [novedades, setNovedades] = useState('');
-  const [montoCobro, setMontoCobro] = useState('');
+  const [activeTab, setActiveTab] = useState<'CT' | 'ST'>('CT');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    const unsub = storageService.subscribeToEvents(setOrders);
-    return () => unsub();
+    storageService.subscribeToEvents(setOrders);
   }, []);
 
-  const today = new Date().toISOString().split('T')[0];
-
-  // Lógica de filtrado solicitada
-  const toDispatch = orders.filter(o => 
-    (o.status === EventStatus.CONFIRMED || o.status === EventStatus.DISPATCHED) && o.executionDate >= today
-  );
-  
-  const toPickup = orders.filter(o => 
-    (o.status === EventStatus.DELIVERED || o.status === EventStatus.DISPATCHED || o.status === EventStatus.PARTIAL_RETURN) && o.executionDate <= today
+  const filtered = orders.filter(o => 
+    (o.status === EventStatus.CONFIRMED || o.status === EventStatus.DISPATCHED) &&
+    (activeTab === 'CT' ? o.requiresDelivery : !o.requiresDelivery) &&
+    o.clientName.toLowerCase().includes(search.toLowerCase())
   );
 
-  const archived = orders.filter(o => o.status === EventStatus.FINISHED);
-
-  const displayed = (activeTab === 'LOGISTICA' ? toDispatch : activeTab === 'RETIROS' ? toPickup : archived)
-    .filter(o => o.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(o.orderNumber).includes(searchQuery));
-
-  const handleUpdateStatus = async (o: EventOrder, s: EventStatus) => {
-      await storageService.saveEvent({ ...o, status: s });
-      uiService.alert("Actualizado", `Estado de pedido #${o.orderNumber} actualizado a ${s}.`);
+  const handleDispatch = async (o: EventOrder) => {
+    if (await uiService.confirm("Confirmar Despacho", `¿Desea marcar el pedido #${o.orderNumber} como DESPACHADO?`)) {
+      await storageService.saveEvent({ ...o, status: EventStatus.DISPATCHED });
+      uiService.alert("Éxito", "Estado actualizado.");
+    }
   };
 
-  const handleProcessIngreso = async (o: EventOrder, hasIssues: boolean) => {
-      if (!hasIssues) {
-          // Si no hay novedades, archiva automáticamente
-          await storageService.saveEvent({ ...o, status: EventStatus.FINISHED });
-          uiService.alert("Finalizado", "Pedido recibido conforme. Se ha archivado en el repositorio.");
-      } else {
-          // Si hay novedades, pasa a retiro parcial
-          await storageService.saveEvent({ ...o, status: EventStatus.PARTIAL_RETURN, returnNotes: novedades });
-          uiService.alert("Novedades", "Pedido registrado con novedades. Queda pendiente en Retiro Parcial.");
-      }
-      setSelectedOrder(null);
-      setNovedades('');
-  };
-
-  const handleCobroExpress = async (o: EventOrder) => {
-      const monto = parseFloat(montoCobro);
-      if (isNaN(monto) || monto <= 0) return;
-      const nuevoPagado = o.paidAmount + monto;
-      await storageService.saveEvent({ ...o, paidAmount: nuevoPagado });
-      setMontoCobro('');
-      uiService.alert("Cobro", "Pago parcial registrado satisfactoriamente.");
+  const handleDeliver = async (o: EventOrder) => {
+    await storageService.saveEvent({ ...o, status: EventStatus.DELIVERED });
+    uiService.alert("Logística", "Pedido marcado como ENTREGADO.");
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <h2 className="text-2xl font-black text-brand-900 uppercase">Logística y Despachos</h2>
-            <div className="flex bg-zinc-100 p-1 rounded-2xl">
-                {['LOGISTICA', 'RETIROS', 'ARCHIVO'].map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === tab ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>{tab}</button>
-                ))}
-            </div>
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-black text-brand-950 uppercase tracking-tighter">Gestión de Logística</h2>
+          <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest mt-1">Control de salidas de bodega y entregas</p>
         </div>
-
-        <div className="bg-white p-4 rounded-2xl shadow-soft border border-zinc-100">
-            <div className="relative">
-                <input className="w-full bg-zinc-50 border-none p-3 pl-12 rounded-xl text-xs font-bold outline-none" placeholder="Buscar en logística..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 opacity-30">🔍</span>
-            </div>
+        <div className="flex bg-zinc-100 p-1.5 rounded-2xl shadow-inner gap-1">
+          <button onClick={() => setActiveTab('CT')} className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'CT' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>🚚 Con Transporte (C/T)</button>
+          <button onClick={() => setActiveTab('ST')} className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'ST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}>🏠 Retiro en Local (S/T)</button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
-            {displayed.map(o => (
-                <div key={o.id} className="bg-white p-6 rounded-[2rem] shadow-soft border-t-8 border-brand-900 flex flex-col h-full">
-                    <div className="flex justify-between mb-4">
-                        <span className="text-[10px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
-                        <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded-full ${o.status === EventStatus.CONFIRMED ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{o.status}</span>
-                    </div>
-                    <h3 className="text-xs font-black text-zinc-950 uppercase mb-1">{o.clientName}</h3>
-                    <p className="text-[9px] font-bold text-zinc-400 uppercase mb-4">🗓️ {o.executionDate}</p>
-                    
-                    <div className="bg-zinc-50 p-3 rounded-xl mb-4 text-[9px] font-black uppercase">
-                        <div className="flex justify-between"><span>Saldo:</span> <span className="text-rose-600 font-black">$ {(o.total - o.paidAmount).toFixed(2)}</span></div>
-                    </div>
+      <div className="bg-white p-4 rounded-2xl shadow-soft border border-zinc-100">
+         <input className="w-full bg-zinc-50 border-none h-12 px-6 rounded-xl text-xs font-bold outline-none" placeholder="Buscar por cliente o número de orden..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
 
-                    <div className="mt-auto space-y-2">
-                        {activeTab === 'LOGISTICA' && (
-                            <div className="flex gap-2">
-                                <button onClick={() => handleUpdateStatus(o, EventStatus.DISPATCHED)} className="flex-1 py-3 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase shadow-md active:scale-95 transition-transform">Despachar</button>
-                                <button onClick={() => handleUpdateStatus(o, EventStatus.DELIVERED)} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg text-[8px] font-black uppercase shadow-md active:scale-95 transition-transform">Entregar</button>
-                            </div>
-                        )}
-                        {activeTab === 'RETIROS' && (
-                            <button onClick={() => setSelectedOrder(o)} className="w-full py-4 bg-brand-900 text-white rounded-xl text-[9px] font-black uppercase shadow-premium active:scale-95 transition-transform">Procesar Ingreso</button>
-                        )}
-                        {activeTab !== 'ARCHIVO' && (
-                            <div className="flex gap-2 border-t pt-3 mt-1">
-                                <input type="number" placeholder="$" className="w-16 h-8 bg-zinc-100 rounded px-2 text-xs font-black" value={montoCobro} onChange={e=>setMontoCobro(e.target.value)} />
-                                <button onClick={() => handleCobroExpress(o)} className="flex-1 h-8 bg-zinc-50 text-zinc-400 rounded text-[7px] font-black uppercase border border-zinc-100">Cobrar Saldo</button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            ))}
-            {displayed.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros activos en esta sección</div>}
-        </div>
-
-        {selectedOrder && (
-            <div className="fixed inset-0 bg-zinc-950/50 backdrop-blur-md flex items-center justify-center p-4 z-[100]">
-                <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-premium animate-slide-up">
-                    <h3 className="text-xl font-black text-brand-950 uppercase mb-4 tracking-tighter">Control de Retiro</h3>
-                    <div className="space-y-4">
-                        <p className="text-[10px] font-bold text-zinc-500 uppercase leading-relaxed">¿El mobiliario presenta daños, pérdidas o requiere limpieza especial?</p>
-                        <textarea className="w-full h-28 bg-zinc-50 rounded-2xl p-4 text-xs font-bold outline-none border border-zinc-100 focus:ring-4 focus:ring-brand-50" placeholder="Detalle novedades aquí..." value={novedades} onChange={e=>setNovedades(e.target.value)} />
-                        <div className="grid grid-cols-2 gap-3 pt-2">
-                            <button onClick={() => handleProcessIngreso(selectedOrder, false)} className="py-4 bg-emerald-600 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">Todo Conforme</button>
-                            <button onClick={() => handleProcessIngreso(selectedOrder, true)} className="py-4 bg-rose-600 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">Con Novedades</button>
-                        </div>
-                        <button onClick={() => setSelectedOrder(null)} className="w-full py-2 text-zinc-300 font-black uppercase text-[8px]">Cancelar</button>
-                    </div>
-                </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filtered.map(o => (
+          <div key={o.id} className="bg-white rounded-[2.5rem] p-8 shadow-premium border border-zinc-100 flex flex-col relative overflow-hidden">
+            <div className={`absolute top-0 right-0 h-2 w-full ${o.status === EventStatus.CONFIRMED ? 'bg-amber-400' : 'bg-blue-500'}`}></div>
+            <div className="flex justify-between items-start mb-6">
+               <span className="text-[10px] font-black text-zinc-300">ORD-#{o.orderNumber}</span>
+               <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${o.status === EventStatus.CONFIRMED ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>{o.status}</span>
             </div>
-        )}
+            <h3 className="text-sm font-black text-zinc-950 uppercase mb-1">{o.clientName}</h3>
+            <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-4">📍 {o.deliveryAddress || 'Retiro en Local'}</p>
+            <div className="bg-zinc-50 p-4 rounded-2xl mb-8">
+               <p className="text-[8px] font-black text-zinc-400 uppercase mb-2">Items a Despachar:</p>
+               <div className="text-[10px] font-bold text-zinc-700 space-y-1">
+                  {o.items.length} artículos en lista.
+               </div>
+            </div>
+            <div className="mt-auto flex gap-2">
+              {o.status === EventStatus.CONFIRMED ? (
+                <button onClick={() => handleDispatch(o)} className="flex-1 py-3 bg-zinc-950 text-white rounded-xl font-black uppercase text-[8px] shadow-lg">📦 Marcar Despachado</button>
+              ) : (
+                <button onClick={() => handleDeliver(o)} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[8px] shadow-lg">✅ Confirmar Entrega</button>
+              )}
+            </div>
+          </div>
+        ))}
+        {filtered.length === 0 && <div className="col-span-full py-20 text-center opacity-20 font-black uppercase text-xs">Sin logística pendiente en esta sección</div>}
+      </div>
     </div>
   );
 };

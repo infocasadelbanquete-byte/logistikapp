@@ -1,106 +1,103 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storageService';
-import { EventOrder, InventoryItem, UserRole, EventStatus } from '../types';
+import { EventOrder, EventStatus } from '../types';
 
 const Dashboard: React.FC = () => {
   const [events, setEvents] = useState<EventOrder[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [reportPeriod, setReportPeriod] = useState<'WEEK' | 'MONTH'>('WEEK');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const session = storageService.getCurrentSession();
-    setCurrentUser(session);
-    const unsubEvents = storageService.subscribeToEvents(setEvents);
-    const unsubInventory = storageService.subscribeToInventory(setInventory);
-    return () => { unsubEvents(); unsubInventory(); };
+    const unsub = storageService.subscribeToEvents(all => {
+      setEvents(all);
+      setLoading(false);
+    });
+    return () => unsub();
   }, []);
 
-  const getFilteredEvents = () => {
-    const now = new Date();
-    const start = new Date(now);
-    if (reportPeriod === 'WEEK') start.setDate(now.getDate() - 7);
-    else start.setMonth(now.getMonth() - 1);
-    
-    return events.filter(e => {
-        const evDate = new Date(e.executionDate + 'T12:00:00');
-        const s = String(e.status).toUpperCase();
-        return evDate >= start && s !== 'QUOTE' && s !== 'PROFORMA';
-    });
-  };
+  const today = new Date();
+  const next7Days = new Date();
+  next7Days.setDate(today.getDate() + 7);
 
-  const filteredReport = getFilteredEvents();
-  const issuesCount = filteredReport.filter(e => String(e.status).toUpperCase() === 'WITH_ISSUES' || String(e.status).toUpperCase() === 'NOVEDADES').length;
-  const isPrivileged = currentUser?.role === UserRole.SUPER_ADMIN;
+  const weeklyOrders = events.filter(e => {
+    const d = new Date(e.executionDate);
+    return d >= today && d <= next7Days && e.status !== EventStatus.CANCELLED;
+  });
+
+  const alerts = events.filter(e => e.status === EventStatus.PARTIAL_RETURN);
+  const pendingPayments = events.filter(e => e.total - e.paidAmount - (e.withheldAmount || 0) > 1);
+
+  if (loading) return <div className="animate-pulse flex flex-col gap-4"><div className="h-40 bg-white rounded-3xl"></div></div>;
 
   return (
-    <div className="space-y-6 md:space-y-8 animate-fade-in max-w-full overflow-hidden">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-zinc-900 tracking-tighter uppercase leading-none">Panel Logístico</h1>
-          <p className="text-zinc-400 font-bold mt-1.5 uppercase tracking-[0.3em] text-[8px]">Bienvenido, {currentUser?.name}</p>
+    <div className="space-y-8 animate-fade-in">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Tablero Operativo Semanal */}
+        <div className="lg:col-span-2 space-y-4">
+          <h2 className="text-xl font-black text-brand-950 uppercase tracking-tighter flex items-center gap-2">
+            <span>📅</span> Hoja de Ruta Semanal
+          </h2>
+          <div className="bg-white rounded-[2.5rem] shadow-premium border border-zinc-100 overflow-hidden">
+            <div className="p-6 border-b border-zinc-50 bg-zinc-50/30 flex justify-between items-center">
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Próximos 7 días</span>
+              <span className="bg-brand-900 text-white text-[9px] font-black px-3 py-1 rounded-full">{weeklyOrders.length} PEDIDOS</span>
+            </div>
+            <div className="divide-y divide-zinc-50 max-h-[400px] overflow-y-auto scrollbar-hide">
+              {weeklyOrders.map(e => (
+                <div key={e.id} className="p-6 hover:bg-zinc-50 transition-colors flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black text-zinc-950 uppercase mb-0.5">{e.clientName}</p>
+                    <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">🗓️ {e.executionDate} • {e.requiresDelivery ? 'C/T' : 'S/T'}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase ${
+                      e.status === EventStatus.CONFIRMED ? 'bg-amber-100 text-amber-700' :
+                      e.status === EventStatus.DISPATCHED ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                    }`}>
+                      {e.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {weeklyOrders.length === 0 && <div className="p-20 text-center opacity-20 font-black uppercase text-xs">Sin pedidos para esta semana</div>}
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-6 rounded-[2rem] shadow-soft border border-zinc-100">
-              <p className="text-[8px] font-black text-zinc-400 uppercase mb-2 tracking-widest">Catálogo Activo</p>
-              <p className="text-3xl font-black text-zinc-950 leading-none">{inventory.length}</p>
+        {/* Alertas y Cartera */}
+        <div className="space-y-6">
+          <div className="bg-rose-50 border border-rose-100 rounded-[2rem] p-6 shadow-sm">
+            <h3 className="text-rose-900 text-xs font-black uppercase mb-4 flex items-center gap-2">
+              <span>⚠️</span> Alertas de Novedades
+            </h3>
+            <div className="space-y-3">
+              {alerts.map(e => (
+                <div key={e.id} className="bg-white/80 p-3 rounded-xl border border-rose-200">
+                  <p className="text-[10px] font-black text-rose-950 uppercase mb-1">#ORD-{e.orderNumber}</p>
+                  <p className="text-[9px] text-rose-700 font-bold uppercase">{e.returnNotes || 'Sin descripción de novedad'}</p>
+                </div>
+              ))}
+              {alerts.length === 0 && <p className="text-[9px] font-bold text-rose-300 uppercase text-center py-4">Sin novedades pendientes</p>}
+            </div>
           </div>
-          <div className="bg-white p-6 rounded-[2rem] shadow-soft border border-zinc-100">
-              <p className="text-[8px] font-black text-zinc-400 uppercase mb-2 tracking-widest">Pedidos {reportPeriod === 'WEEK' ? 'Semanales' : 'Mensuales'}</p>
-              <p className="text-3xl font-black text-brand-900 leading-none">{filteredReport.length}</p>
-          </div>
-          <div className="bg-rose-50 p-6 rounded-[2rem] border border-rose-100">
-              <p className="text-[8px] font-black text-rose-400 uppercase mb-2 tracking-widest">Pendientes Novedad</p>
-              <p className="text-3xl font-black text-rose-600 leading-none">{issuesCount}</p>
-          </div>
-          <div className="bg-zinc-950 p-6 rounded-[2rem] text-white">
-              <p className="text-[8px] font-black text-zinc-500 uppercase mb-2 tracking-widest">Sincronización</p>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                <p className="text-xs font-black uppercase">Activa</p>
-              </div>
-          </div>
-      </div>
 
-      <div className="bg-white rounded-[2.5rem] p-6 md:p-10 shadow-premium border border-zinc-100">
-          <div className="flex flex-col sm:flex-row justify-between items-center mb-8 gap-4">
-              <h3 className="text-[10px] font-black text-brand-900 uppercase tracking-widest">Actividad de Pedidos y Novedades</h3>
-              <div className="flex bg-zinc-100 p-1 rounded-xl gap-1 w-full sm:w-auto">
-                  <button onClick={() => setReportPeriod('WEEK')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-[8px] font-black uppercase transition-all ${reportPeriod === 'WEEK' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}>Semana</button>
-                  <button onClick={() => setReportPeriod('MONTH')} className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-[8px] font-black uppercase transition-all ${reportPeriod === 'MONTH' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-400'}`}>Mes</button>
-              </div>
+          <div className="bg-emerald-50 border border-emerald-100 rounded-[2rem] p-6 shadow-sm">
+            <h3 className="text-emerald-900 text-xs font-black uppercase mb-4 flex items-center gap-2">
+              <span>💰</span> Cartera Crítica
+            </h3>
+            <div className="space-y-3">
+              {pendingPayments.slice(0, 3).map(e => (
+                <div key={e.id} className="bg-white/80 p-3 rounded-xl border border-emerald-200 flex justify-between items-center">
+                  <div>
+                    <p className="text-[10px] font-black text-emerald-950 uppercase">{e.clientName}</p>
+                    <p className="text-[8px] text-emerald-500 font-black">SALDO: $ {(e.total - e.paidAmount).toFixed(2)}</p>
+                  </div>
+                  <span className="text-xs">💸</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="overflow-x-auto no-scrollbar -mx-6 sm:mx-0">
-              <table className="w-full text-left min-w-[500px]">
-                  <thead>
-                      <tr className="text-[9px] font-black text-zinc-400 uppercase border-b border-zinc-50 pb-4">
-                          <th className="px-6 pb-4">Orden</th>
-                          <th className="px-6 pb-4">Cliente</th>
-                          <th className="px-6 pb-4">Fecha</th>
-                          {isPrivileged && <th className="px-6 pb-4 text-right">Total</th>}
-                          <th className="px-6 pb-4 text-center">Estado</th>
-                      </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-50">
-                      {filteredReport.slice(0, 10).map(e => (
-                          <tr key={e.id} className="hover:bg-zinc-50 transition-colors">
-                              <td className="px-6 py-4 font-mono font-black text-[9px] text-zinc-400">#ORD-{e.orderNumber}</td>
-                              <td className="px-6 py-4 text-[10px] font-black text-zinc-800 uppercase truncate max-w-[150px]">{e.clientName}</td>
-                              <td className="px-6 py-4 text-[10px] font-bold text-zinc-500 uppercase">{e.executionDate}</td>
-                              {isPrivileged && <td className="px-6 py-4 text-[10px] font-black text-zinc-900 text-right">$ {e.total.toFixed(2)}</td>}
-                              <td className="px-6 py-4 text-center">
-                                  <span className={`px-2 py-0.5 rounded text-[7px] font-black uppercase ${String(e.status).toUpperCase() === 'WITH_ISSUES' || String(e.status).toUpperCase() === 'NOVEDADES' ? 'bg-rose-100 text-rose-600' : 'bg-zinc-100 text-zinc-500'}`}>
-                                      {e.status}
-                                  </span>
-                              </td>
-                          </tr>
-                      ))}
-                      {filteredReport.length === 0 && <tr><td colSpan={isPrivileged ? 5 : 4} className="py-10 text-center opacity-20 uppercase font-black text-xs">Sin actividad reciente</td></tr>}
-                  </tbody>
-              </table>
-          </div>
+        </div>
       </div>
     </div>
   );

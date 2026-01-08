@@ -17,7 +17,7 @@ const PurchasesView: React.FC = () => {
   
   const getInitialForm = (): Partial<PurchaseTransaction> => ({
     date: new Date().toISOString().split('T')[0],
-    provider: { name: '', documentId: '', phone: '', mobile: '', email: '' },
+    provider: { name: '', documentId: '', phone: '', mobile: '', email: '' } as Provider,
     details: '',
     docType: PurchaseDocType.INVOICE,
     docNumber: '',
@@ -147,9 +147,9 @@ const PurchasesView: React.FC = () => {
                         <input required type="text" list="provider-list" value={formData.provider?.name || ''} onChange={e => {
                             const p = providers.find(pr => pr.name === e.target.value);
                             if (p) {
-                                setFormData({...formData, provider: { name: p.name, documentId: p.documentId, phone: p.phone || '', mobile: p.mobile || '', email: p.email || '' } as any});
+                                setFormData(prev => ({...prev, provider: { name: p.name, documentId: p.documentId, phone: p.phone || '', mobile: p.mobile || '', email: p.email || '' } as Provider}));
                             } else {
-                                setFormData({...formData, provider: {...(formData.provider || {}), name: e.target.value} as any});
+                                setFormData(prev => ({...prev, provider: {...(prev.provider || {}), name: e.target.value} as Provider}));
                             }
                         }} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-bold outline-none" />
                         <datalist id="provider-list">
@@ -158,22 +158,22 @@ const PurchasesView: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2">RUC / CI *</label>
-                        <input required type="text" value={formData.provider?.documentId || ''} onChange={e => setFormData({...formData, provider: {...(formData.provider || {}), documentId: e.target.value} as any})} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-mono font-black" />
+                        <input required type="text" value={formData.provider?.documentId || ''} onChange={e => setFormData(prev => ({...prev, provider: {...(prev.provider || {}), documentId: e.target.value} as Provider}))} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-mono font-black" />
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-6 border-t border-zinc-100">
                     <div className="lg:col-span-2 space-y-2">
                         <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2">Detalles de Compra</label>
-                        <input type="text" value={formData.details || ''} onChange={e => setFormData({...formData, details: e.target.value})} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-bold outline-none" />
+                        <input type="text" value={formData.details || ''} onChange={e => setFormData(prev => ({...prev, details: e.target.value}))} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-bold outline-none" />
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2">Nº Comprobante</label>
-                        <input type="text" value={formData.docNumber || ''} onChange={e => setFormData({...formData, docNumber: e.target.value})} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-mono font-black outline-none" placeholder="001-001..." />
+                        <input type="text" value={formData.docNumber || ''} onChange={e => setFormData(prev => ({...prev, docNumber: e.target.value}))} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-mono font-black outline-none" placeholder="001-001..." />
                     </div>
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-2">Fecha Documento</label>
-                        <input type="date" value={formData.date || ''} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-bold outline-none" />
+                        <input type="date" value={formData.date || ''} onChange={e => setFormData(prev => ({...prev, date: e.target.value}))} className="w-full h-14 bg-zinc-50 border-none rounded-2xl px-6 font-bold outline-none" />
                     </div>
                 </div>
 

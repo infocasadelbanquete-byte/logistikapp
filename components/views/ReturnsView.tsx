@@ -1,56 +1,92 @@
 import React, { useState, useEffect } from 'react';
-import { EventOrder, EventStatus } from '../../types';
+import { EventOrder, EventStatus, InventoryItem } from '../../types';
 import { storageService } from '../../services/storageService';
 import { uiService } from '../../services/uiService';
 
 const ReturnsView: React.FC = () => {
-  const [events, setEvents] = useState<EventOrder[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [orders, setOrders] = useState<EventOrder[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<EventOrder | null>(null);
+  const [issueNotes, setIssueNotes] = useState('');
 
   useEffect(() => {
-    const unsub = storageService.subscribeToEvents((all) => {
-        // VISIBILIDAD ROBUSTA: Incluye todos los estados de pedidos que están fuera de bodega
-        const relevant = all.filter(e => {
-            const s = String(e.status).toUpperCase();
-            return s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO' || 
-                   s === 'IN_PROGRESS' || s === 'EN CURSO' || 
-                   s === 'FINISHED' || s === 'FINALIZADO' || 
-                   s === 'WITH_ISSUES' || s === 'NOVEDADES';
-        });
-        relevant.sort((a,b) => b.executionDate.localeCompare(a.executionDate));
-        setEvents(relevant);
-    });
-    return () => unsub();
+    storageService.subscribeToEvents(setOrders);
+    storageService.subscribeToInventory(setInventory);
   }, []);
 
+  const activeOrders = orders.filter(o => 
+    o.status === EventStatus.DELIVERED || o.status === EventStatus.IN_PROGRESS || o.status === EventStatus.TO_PICKUP || o.status === EventStatus.PARTIAL_RETURN
+  );
+
+  const handleCloseSuccess = async (o: EventOrder) => {
+    if (await uiService.confirm("Ingreso Sin Novedad", "¿Todo el mobiliario regresó conforme? El inventario se repondrá automáticamente.")) {
+      // Reponer Stock
+      for (const oi of o.items) {
+        await storageService.updateStock(oi.itemId, oi.quantity);
+      }
+      await storageService.saveEvent({ ...o, status: EventStatus.FINISHED });
+      uiService.alert("Éxito", "Pedido finalizado y stock repuesto.");
+    }
+  };
+
+  const handleReportIssues = async () => {
+    if (!selectedOrder || !issueNotes.trim()) return;
+    await storageService.saveEvent({ ...selectedOrder, status: EventStatus.PARTIAL_RETURN, returnNotes: issueNotes });
+    uiService.alert("Novedades", "Pedido marcado con ingreso parcial. Debe gestionar la resolución de daños.");
+    setSelectedOrder(null);
+    setIssueNotes('');
+  };
+
   return (
-    <div className="h-full flex flex-col space-y-6 animate-fade-in p-2 md:p-6">
-      <h2 className="text-2xl font-black text-brand-900 uppercase tracking-tighter">Retorno de Mobiliario</h2>
-      <div className="bg-white p-4 rounded-3xl shadow-soft border border-zinc-100 mb-6">
-        <div className="relative">
-            <input className="w-full border-none p-3 pl-12 rounded-xl text-xs font-bold bg-zinc-50 focus:ring-4 focus:ring-brand-50 outline-none" placeholder="Buscar pedido por nombre o número..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 grayscale opacity-30 text-xl">🔍</span>
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-end gap-4">
+        <div>
+          <h2 className="text-3xl font-black text-brand-950 uppercase tracking-tighter">Retorno e Ingresos</h2>
+          <p className="text-zinc-400 text-[10px] font-black uppercase tracking-widest mt-1">Control de mobiliario que regresa a bodega</p>
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-        {events.filter(e => e.clientName.toLowerCase().includes(searchQuery.toLowerCase())).map(event => {
-            const s = String(event.status).toUpperCase();
-            const hasIssues = s === 'WITH_ISSUES' || s === 'NOVEDADES';
 
-            return (
-                <div key={event.id} className="bg-white p-6 rounded-[2rem] shadow-soft border-t-8 border-brand-950 flex flex-col hover:shadow-premium transition-all">
-                    <div className="flex justify-between items-center mb-4">
-                        <span className="font-mono font-black text-zinc-300 text-[10px]">#ORD-{event.orderNumber}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${hasIssues ? 'bg-rose-50 text-rose-600' : 'bg-orange-50 text-orange-600'}`}>{hasIssues ? 'Novedades' : 'En Campo'}</span>
-                    </div>
-                    <h3 className="text-xs font-black text-zinc-950 truncate uppercase mb-1">{event.clientName}</h3>
-                    <p className="text-[9px] font-bold text-zinc-400 uppercase mb-6 tracking-widest">🗓️ {event.executionDate}</p>
-                    <button className="mt-auto w-full py-3 bg-zinc-950 text-white font-black text-[10px] uppercase rounded-xl shadow-lg active:scale-95 transition-all">Procesar Ingreso</button>
-                </div>
-            );
-        })}
-        {events.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros por recuperar</div>}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {activeOrders.map(o => (
+          <div key={o.id} className="bg-white p-8 rounded-[2.5rem] shadow-premium border border-zinc-100 flex flex-col hover:border-brand-100 transition-all">
+            <div className="flex justify-between items-start mb-6">
+               <span className="text-[10px] font-black text-zinc-300">ORD-#{o.orderNumber}</span>
+               <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase ${o.status === EventStatus.PARTIAL_RETURN ? 'bg-rose-50 text-rose-600' : 'bg-orange-50 text-orange-600'}`}>{o.status}</span>
+            </div>
+            <h3 className="text-sm font-black text-zinc-950 uppercase mb-1">{o.clientName}</h3>
+            <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest mb-6">🗓️ Fin de Evento: {o.executionDate}</p>
+            
+            <div className="mt-auto space-y-2">
+               <button onClick={() => handleCloseSuccess(o)} className="w-full py-3 bg-emerald-600 text-white rounded-xl font-black uppercase text-[8px] shadow-lg">✅ Ingresar Sin Novedad</button>
+               <button onClick={() => setSelectedOrder(o)} className="w-full py-3 bg-white text-rose-500 rounded-xl font-black uppercase text-[8px] border border-rose-100 hover:bg-rose-50 transition-colors">⚠️ Reportar Novedades</button>
+            </div>
+          </div>
+        ))}
+        {activeOrders.length === 0 && <div className="col-span-full py-20 text-center opacity-20 font-black uppercase text-xs">Sin pedidos pendientes por recuperar</div>}
       </div>
+
+      {selectedOrder && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-md flex items-center justify-center p-4 z-[100] animate-fade-in">
+           <div className="bg-white rounded-[3rem] p-10 shadow-premium w-full max-w-md border border-white animate-slide-up">
+              <h3 className="text-xl font-black text-brand-950 uppercase mb-2 tracking-tighter">Reportar Daños / Faltantes</h3>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-8">Pedido #{selectedOrder.orderNumber} - {selectedOrder.clientName}</p>
+              
+              <div className="space-y-4">
+                 <textarea 
+                   className="w-full bg-zinc-50 border-none rounded-[1.5rem] p-6 text-xs font-bold outline-none focus:ring-8 focus:ring-brand-50 shadow-inner" 
+                   rows={4} 
+                   placeholder="Detalle roturas, pérdidas o estado de los productos..."
+                   value={issueNotes}
+                   onChange={e => setIssueNotes(e.target.value)}
+                 />
+                 <div className="flex flex-col gap-2 pt-4">
+                    <button onClick={handleReportIssues} className="w-full h-14 bg-rose-600 text-white rounded-xl font-black uppercase text-[9px] tracking-widest shadow-lg active:scale-95">💾 Sellar Novedad</button>
+                    <button onClick={() => setSelectedOrder(null)} className="w-full py-2 text-zinc-300 font-bold uppercase text-[8px]">Cancelar</button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
