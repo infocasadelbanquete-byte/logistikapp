@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, PaymentMethod, PaymentStatus, PaymentTransaction, UserRole } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -40,7 +41,7 @@ const PaymentsView: React.FC = () => {
       const results = events.filter(e => {
           const s = String(e.status).toUpperCase();
           const pending = e.total - e.paidAmount - (e.withheldAmount || 0);
-          return s !== 'QUOTE' && s !== 'PROFORMA' && s !== 'CANCELLED' && s !== 'ANULADO' && 
+          return s !== 'QUOTE' && s !== 'PROFORMA' && s !== 'CANCELLED' && s !== 'CANCELADO' && s !== 'ANULADO' && 
                  (pending > 0.05) &&
                  (!searchQuery.trim() || (e.clientName.toLowerCase().includes(q) || String(e.orderNumber).includes(q)))
       });

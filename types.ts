@@ -5,7 +5,7 @@ export enum UserRole {
   STAFF = 'STAFF'
 }
 
-export type UserStatus = 'ACTIVE' | 'PENDING';
+export type UserStatus = 'ACTIVO' | 'PENDIENTE';
 
 export interface User {
   id: string;
@@ -48,7 +48,7 @@ export interface InventoryItem {
 }
 
 export enum EventStatus {
-  QUOTE = 'QUOTE',
+  QUOTE = 'PROFORMA',
   CONFIRMED = 'CONFIRMADO',
   DISPATCHED = 'DESPACHADO',
   DELIVERED = 'ENTREGADO',
@@ -57,13 +57,13 @@ export enum EventStatus {
   PARTIAL_RETURN = 'INGRESO PARCIAL',
   FINISHED = 'FINALIZADO',
   CANCELLED = 'CANCELADO',
-  RETURNED = 'RETORNADO' // Added to fix ClientView errors
+  RETURNED = 'RETORNADO'
 }
 
 export enum PaymentStatus {
-  PAID = 'PAID',
-  CREDIT = 'CREDIT',
-  PARTIAL = 'PARTIAL'
+  PAID = 'PAGADO',
+  CREDIT = 'CRÉDITO',
+  PARTIAL = 'PARCIAL'
 }
 
 export enum PaymentMethod {

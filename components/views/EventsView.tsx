@@ -122,7 +122,7 @@ const EventsView: React.FC = () => {
       orderDate: new Date().toISOString(),
       executionDate: orderData.executionDate,
       rentalDays: orderData.rentalDays,
-      status: EventStatus.CONFIRMED,
+      status: editingId ? orders.find(o => o.id === editingId)?.status || EventStatus.CONFIRMED : EventStatus.CONFIRMED,
       paymentStatus: orderData.paymentAmount >= total ? PaymentStatus.PAID : (orderData.paymentAmount > 0 ? PaymentStatus.PARTIAL : PaymentStatus.CREDIT),
       paidAmount: orderData.paymentAmount,
       total,
@@ -156,6 +156,26 @@ const EventsView: React.FC = () => {
     setLoading(false);
     uiService.alert("Éxito", `Pedido #${orderNumber} registrado.`);
     resetForm();
+  };
+
+  const handleCancelOrder = async (order: EventOrder) => {
+    if (await uiService.confirm("Anular Pedido", `¿Está seguro de anular el pedido #ORD-${order.orderNumber}?`)) {
+      setLoading(true);
+      try {
+        await storageService.saveEvent({ ...order, status: EventStatus.CANCELLED });
+        // Return stock if it was confirmed or beyond
+        if (order.status !== EventStatus.QUOTE) {
+          for (const item of order.items) {
+            await storageService.updateStock(item.itemId, item.quantity);
+          }
+        }
+        uiService.alert("Anulado", "El pedido ha sido anulado y el stock repuesto.");
+      } catch (e: any) {
+        uiService.alert("Error", "No se pudo anular el pedido.");
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   const resetForm = () => {
@@ -225,16 +245,33 @@ const EventsView: React.FC = () => {
 
   const filteredOrders = orders.filter(o => {
     if (o.status === EventStatus.QUOTE) return false;
+    const matchesSearch = o.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(o.orderNumber).includes(searchQuery);
+
+    if (showArchive) return matchesSearch;
+    
     const orderDate = new Date(o.executionDate);
     const now = new Date();
     const isCurrentMonth = orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
     const hasPendingBalance = (o.total - o.paidAmount) > 0.05;
     const hasIssues = o.status === EventStatus.PARTIAL_RETURN;
-    const matchesSearch = o.clientName.toLowerCase().includes(searchQuery.toLowerCase()) || String(o.orderNumber).includes(searchQuery);
 
-    if (showArchive) return matchesSearch;
     return matchesSearch && (isCurrentMonth || hasPendingBalance || hasIssues);
   });
+
+  const getStatusStyle = (status: EventStatus) => {
+    switch (status) {
+      case EventStatus.CONFIRMED: return 'bg-blue-100 text-blue-700 border-blue-200';
+      case EventStatus.DISPATCHED: return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+      case EventStatus.DELIVERED: return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+      case EventStatus.IN_PROGRESS: return 'bg-amber-100 text-amber-700 border-amber-200';
+      case EventStatus.TO_PICKUP: return 'bg-orange-100 text-orange-700 border-orange-200';
+      case EventStatus.PARTIAL_RETURN: return 'bg-rose-100 text-rose-700 border-rose-200';
+      case EventStatus.FINISHED: return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+      case EventStatus.CANCELLED: return 'bg-zinc-200 text-zinc-500 border-zinc-300';
+      case EventStatus.RETURNED: return 'bg-teal-100 text-teal-700 border-teal-200';
+      default: return 'bg-zinc-100 text-zinc-600 border-zinc-200';
+    }
+  };
 
   const handleUpdateItemQuantity = (itemId: string, qty: string) => {
     const val = parseInt(qty) || 1;
@@ -289,19 +326,22 @@ const EventsView: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 pb-20">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 pb-20">
             {filteredOrders.map(o => (
               <div key={o.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col hover:border-brand-100 transition-all group">
                 <div className="flex justify-between mb-1">
                   <span className="text-[7px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase ${o.status === EventStatus.CANCELLED ? 'bg-zinc-100 text-zinc-400' : 'bg-emerald-50 text-emerald-600'}`}>{o.status}</span>
+                  <span className={`px-1.5 py-0.5 rounded border text-[7px] font-black uppercase ${getStatusStyle(o.status)}`}>{o.status}</span>
                 </div>
                 <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate mb-0.5">{o.clientName}</h3>
                 <p className="text-[8px] font-bold text-zinc-400 uppercase">🗓️ {o.executionDate}</p>
                 {o.warehouseExitNumber && <p className="text-[7px] font-black text-brand-600 mt-1 uppercase">EB N°: {o.warehouseExitNumber}</p>}
                 <div className="mt-auto space-y-1 pt-3">
                   <div className="flex gap-1">
-                      <button onClick={() => handleEdit(o)} className="w-full py-1.5 bg-zinc-50 text-brand-900 rounded-lg text-[8px] font-black uppercase">Detalles</button>
+                      <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase hover:bg-black transition-colors">Editar</button>
+                      {o.status !== EventStatus.CANCELLED && (
+                        <button onClick={() => handleCancelOrder(o)} className="flex-1 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase hover:bg-rose-100 transition-colors">Anular</button>
+                      )}
                   </div>
                 </div>
               </div>
@@ -419,7 +459,7 @@ const EventsView: React.FC = () => {
                  </div>
 
                  <button onClick={handleSave} disabled={loading} className="w-full h-14 bg-brand-900 text-white rounded-2xl font-black uppercase text-[10px] shadow-2xl active:scale-95 transition-all">
-                    {loading ? 'Sincronizando...' : 'Finalizar Pedido'}
+                    {loading ? 'Sincronizando...' : editingId ? 'Actualizar Pedido' : 'Finalizar Pedido'}
                  </button>
               </div>
            </div>
