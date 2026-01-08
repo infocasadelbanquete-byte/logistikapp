@@ -29,8 +29,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentView, 
   const menu: MenuSection[] = [
     { title: 'OPERACIONES', items: [
       { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
-      { id: 'events', label: 'Nuevo Pedido', icon: '🛒' },
-      { id: 'quotes', label: 'Proformas', icon: '📝' },
+      { id: 'events', label: 'Pedidos y Proformas', icon: '🛒' },
       { id: 'dispatch', label: 'Despachos', icon: '🚚' },
       { id: 'returns', label: 'Ingresos', icon: '📥' },
     ]},

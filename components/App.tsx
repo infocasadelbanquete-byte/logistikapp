@@ -10,7 +10,6 @@ import InventoryView from './components/views/InventoryView';
 import UserView from './components/views/UserView';
 import ClientView from './components/views/ClientView';
 import EventsView from './components/views/EventsView';
-import QuotesView from './components/views/QuotesView';
 import ReportsView from './components/views/ReportsView';
 import SettingsView from './components/views/SettingsView';
 import WriteOffsView from './components/views/WriteOffsView';
@@ -50,7 +49,6 @@ const App: React.FC = () => {
     setActiveView('dashboard');
     setLogoutMessage('');
     setShowWelcome(true);
-    storageService.createNotification(`Inicio de sesión: ${user.name}`, 'INFO');
     setTimeout(() => setShowWelcome(false), 2500);
   };
 
@@ -86,7 +84,6 @@ const App: React.FC = () => {
     switch (activeView) {
       case 'dashboard': return <Dashboard />;
       case 'events': return <EventsView />;
-      case 'quotes': return <QuotesView />;
       case 'inventory': return <InventoryView role={role} />;
       case 'dispatch': return <DispatchView />; 
       case 'returns': return <ReturnsView />; 
@@ -110,9 +107,6 @@ const App: React.FC = () => {
         onLogout={handleLogout} 
         currentView={activeView}
         onNavigate={handleNavigate}
-        onRefresh={() => setRefreshTrigger(p => p + 1)}
-        onHome={() => handleNavigate('dashboard')}
-        canGoBack={activeView !== 'dashboard'}
       >
         <div key={activeView + refreshTrigger} className="w-full">
           {renderView()}

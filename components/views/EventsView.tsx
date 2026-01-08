@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { EventOrder, EventStatus, Client, InventoryItem, PaymentMethod, PaymentStatus } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -5,6 +6,7 @@ import { uiService } from '../../services/uiService';
 
 const getStatusStyle = (status: EventStatus) => {
   switch (status) {
+    case EventStatus.QUOTE: return 'bg-violet-100 text-violet-700 border-violet-200';
     case EventStatus.CONFIRMED: return 'bg-blue-100 text-blue-700 border-blue-200';
     case EventStatus.DISPATCHED: return 'bg-indigo-100 text-indigo-700 border-indigo-200';
     case EventStatus.DELIVERED: return 'bg-cyan-100 text-cyan-700 border-cyan-200';
@@ -17,6 +19,7 @@ const getStatusStyle = (status: EventStatus) => {
 
 const EventsView: React.FC = () => {
   const [view, setView] = useState<'LIST' | 'FORM'>('LIST');
+  const [activeTab, setActiveTab] = useState<'ORDERS' | 'QUOTES'>('ORDERS');
   const [orders, setOrders] = useState<EventOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -44,7 +47,7 @@ const EventsView: React.FC = () => {
 
   useEffect(() => {
     const unsub = storageService.subscribeToEvents(all => {
-      setOrders(all.filter(e => e.status !== EventStatus.QUOTE));
+      setOrders(all);
     });
     storageService.subscribeToClients(setClients);
     storageService.subscribeToInventory(setInventory);
@@ -69,7 +72,7 @@ const EventsView: React.FC = () => {
     return base + iva + delivery;
   };
 
-  const handleSave = async () => {
+  const handleSave = async (asQuote: boolean = false) => {
     if (!formData.clientId || selectedItems.length === 0) return uiService.alert("Faltan Datos", "Seleccione cliente e ítems.");
     const total = calculateTotal();
     const orderNumber = editingId ? orders.find(o => o.id === editingId)?.orderNumber || 0 : await storageService.generateOrderNumber();
@@ -80,7 +83,7 @@ const EventsView: React.FC = () => {
       orderNumber,
       warehouseExitNumber: formData.warehouseExitNumber ? parseInt(formData.warehouseExitNumber) : undefined,
       clientName: clients.find(c => c.id === formData.clientId)?.name || 'Cliente',
-      status: editingId ? orders.find(o => o.id === editingId)?.status || EventStatus.CONFIRMED : EventStatus.CONFIRMED,
+      status: asQuote ? EventStatus.QUOTE : (editingId ? orders.find(o => o.id === editingId)?.status || EventStatus.CONFIRMED : EventStatus.CONFIRMED),
       paymentStatus: formData.paymentAmount >= total ? PaymentStatus.PAID : (formData.paymentAmount > 0 ? PaymentStatus.PARTIAL : PaymentStatus.CREDIT),
       paidAmount: parseFloat(formData.paymentAmount) || 0,
       total,
@@ -88,7 +91,7 @@ const EventsView: React.FC = () => {
     };
 
     await storageService.saveEvent(order);
-    uiService.alert("Éxito", "Pedido guardado.");
+    uiService.alert("Éxito", asQuote ? "Proforma guardada." : "Pedido guardado.");
     resetForm();
   };
 
@@ -110,47 +113,85 @@ const EventsView: React.FC = () => {
     setFormData(initialForm);
   };
 
+  const handleConfirmQuote = async (o: EventOrder) => {
+      if (await uiService.confirm("Confirmar Pedido", `¿Desea convertir la proforma #${o.orderNumber} en un pedido confirmado?`)) {
+          const ebNum = await uiService.prompt("Número de Egreso", "Ingrese el EB N° para este pedido (Opcional):");
+          const updated: EventOrder = {
+              ...o,
+              status: EventStatus.CONFIRMED,
+              warehouseExitNumber: ebNum ? parseInt(ebNum) : undefined
+          };
+          await storageService.saveEvent(updated);
+          uiService.alert("Confirmado", "Pedido enviado a Despachos.");
+      }
+  };
+
   const handleCancelOrder = async (o: EventOrder) => {
-      if (await uiService.confirm("Anular", "¿Anular el pedido?")) {
+      if (await uiService.confirm("Anular", "¿Anular el registro?")) {
           await storageService.saveEvent({...o, status: EventStatus.CANCELLED});
       }
   };
 
-  const filteredOrders = orders.filter(o => o.clientName.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredData = orders.filter(o => {
+    const matchesSearch = o.clientName.toLowerCase().includes(searchQuery.toLowerCase());
+    if (activeTab === 'QUOTES') return matchesSearch && o.status === EventStatus.QUOTE;
+    return matchesSearch && o.status !== EventStatus.QUOTE;
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black text-brand-950 uppercase">Pedidos Operativos</h2>
-          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Gestión de Ventas y Despachos</p>
+          <h2 className="text-2xl font-black text-brand-950 uppercase">Gestión Comercial</h2>
+          <p className="text-zinc-400 text-[9px] font-black uppercase tracking-widest">Pedidos y Presupuestos</p>
         </div>
-        <button onClick={() => view === 'LIST' ? setView('FORM') : resetForm()} className="px-6 h-12 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg">
-          {view === 'LIST' ? '+ Nuevo Pedido' : 'Cancelar'}
-        </button>
+        <div className="flex bg-zinc-100 p-1 rounded-2xl shadow-inner gap-1">
+            <button 
+                onClick={() => { setActiveTab('ORDERS'); resetForm(); }}
+                className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'ORDERS' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}
+            >
+                🛒 Pedidos
+            </button>
+            <button 
+                onClick={() => { setActiveTab('QUOTES'); resetForm(); }}
+                className={`px-6 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${activeTab === 'QUOTES' && view === 'LIST' ? 'bg-white text-brand-900 shadow-md' : 'text-zinc-400'}`}
+            >
+                📝 Proformas
+            </button>
+            <button onClick={() => setView('FORM')} className="px-6 py-2 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] shadow-lg ml-2">
+                + Nuevo
+            </button>
+        </div>
       </div>
 
       {view === 'LIST' ? (
         <>
           <div className="bg-white p-4 rounded-2xl shadow-soft border border-zinc-100">
-            <input type="text" placeholder="Filtrar pedidos..." className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <input type="text" placeholder="Filtrar por cliente..." className="w-full h-10 bg-zinc-50 rounded-xl px-4 text-xs font-bold outline-none" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {filteredOrders.map(o => (
-              <div key={o.id} className="bg-white p-3 rounded-xl shadow-soft border border-zinc-100 flex flex-col hover:border-brand-100 transition-all">
+            {filteredData.map(o => (
+              <div key={o.id} className={`bg-white p-3 rounded-xl shadow-soft border-t-2 flex flex-col hover:shadow-premium transition-all ${o.status === EventStatus.QUOTE ? 'border-violet-500' : 'border-brand-500'}`}>
                 <div className="flex justify-between mb-1">
-                  <span className="text-[7px] font-black text-zinc-300">#ORD-{o.orderNumber}</span>
+                  <span className="text-[7px] font-black text-zinc-300">#{o.status === EventStatus.QUOTE ? 'PRO' : 'ORD'}-{o.orderNumber}</span>
                   <span className={`px-1.5 py-0.5 rounded border text-[7px] font-black uppercase ${getStatusStyle(o.status)}`}>{o.status}</span>
                 </div>
                 <h3 className="text-[10px] font-black text-zinc-950 uppercase truncate">{o.clientName}</h3>
                 <p className="text-[8px] font-bold text-zinc-400 uppercase">🗓️ {o.executionDate}</p>
                 {o.warehouseExitNumber && <p className="text-[7px] font-black text-brand-600 mt-1 uppercase">EB N°: {o.warehouseExitNumber}</p>}
-                <div className="mt-auto pt-3 flex gap-1">
-                  <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-900 text-white rounded-lg text-[8px] font-black uppercase">Editar</button>
-                  <button onClick={() => handleCancelOrder(o)} className="flex-1 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-[8px] font-black uppercase">Anular</button>
+                
+                <div className="mt-auto pt-3 flex flex-col gap-1">
+                  {o.status === EventStatus.QUOTE && (
+                      <button onClick={() => handleConfirmQuote(o)} className="w-full py-1.5 bg-emerald-600 text-white rounded-lg text-[8px] font-black uppercase">Confirmar Pedido</button>
+                  )}
+                  <div className="flex gap-1">
+                      <button onClick={() => handleEdit(o)} className="flex-1 py-1.5 bg-zinc-100 text-zinc-600 rounded-lg text-[8px] font-black uppercase">Editar</button>
+                      <button onClick={() => handleCancelOrder(o)} className="flex-1 py-1.5 bg-rose-50 text-rose-300 rounded-lg text-[8px] font-black uppercase">Anular</button>
+                  </div>
                 </div>
               </div>
             ))}
+            {filteredData.length === 0 && <div className="col-span-full py-20 text-center opacity-20 font-black uppercase text-xs">Sin registros</div>}
           </div>
         </>
       ) : (
@@ -198,7 +239,7 @@ const EventsView: React.FC = () => {
               )}
             </div>
             <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-soft">
-              <h3 className="text-[10px] font-black text-zinc-400 uppercase mb-4 px-2 tracking-widest">Detalle del Pedido</h3>
+              <h3 className="text-[10px] font-black text-zinc-400 uppercase mb-4 px-2 tracking-widest">Detalle de Selección</h3>
               <div className="space-y-2">
                 {selectedItems.map(item => (
                   <div key={item.id} className="flex items-center gap-4 bg-zinc-50 p-3 rounded-2xl border border-zinc-100">
@@ -233,13 +274,15 @@ const EventsView: React.FC = () => {
                 </select>
               </div>
               <div className="flex justify-between items-center border-b border-white/10 pb-4">
-                <span className="text-[10px] font-black uppercase opacity-50">Total Venta</span>
+                <span className="text-[10px] font-black uppercase opacity-50">Total</span>
                 <span className="text-3xl font-black tracking-tighter">$ {calculateTotal().toFixed(2)}</span>
               </div>
               <div className="space-y-3">
-                <label className="text-[8px] font-black text-zinc-500 uppercase px-2">Abono Inicial ($)</label>
-                <input type="number" className="w-full h-12 bg-white/10 rounded-xl px-4 text-xl font-black text-center" value={formData.paymentAmount} onChange={e => setFormData({...formData, paymentAmount: e.target.value})} />
-                <button onClick={handleSave} className="w-full h-14 bg-brand-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Confirmar Venta</button>
+                <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => handleSave(true)} className="py-4 bg-white/10 text-white rounded-xl font-black uppercase text-[8px] tracking-widest border border-white/10">💾 Proforma</button>
+                    <button onClick={() => handleSave(false)} className="py-4 bg-brand-600 text-white rounded-xl font-black uppercase text-[8px] tracking-widest">🚀 Pedido</button>
+                </div>
+                <button onClick={resetForm} className="w-full py-2 text-zinc-500 font-black uppercase text-[8px]">Cancelar</button>
               </div>
             </div>
           </div>
