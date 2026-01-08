@@ -5,15 +5,12 @@ import { uiService } from '../../services/uiService';
 
 const DispatchView: React.FC = () => {
   const [allOrders, setAllOrders] = useState<EventOrder[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'TRANSPORT' | 'PICKUP' | 'HISTORY'>('TRANSPORT');
 
   useEffect(() => {
     const unsubEvents = storageService.subscribeToEvents((events) => {
-        // RESTITUCIÓN: Se incluyen estados equivalentes a Reservado y Entregado
+        // VISIBILIDAD: Se incluyen estados equivalentes a Reservado y Entregado
         const relevant = events.filter(e => {
             const s = String(e.status).toUpperCase();
             return s === 'RESERVED' || s === 'RESERVADO' || s === 'CONFIRMADO' || s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO';
@@ -21,10 +18,7 @@ const DispatchView: React.FC = () => {
         relevant.sort((a, b) => new Date(a.executionDate).getTime() - new Date(b.executionDate).getTime());
         setAllOrders(relevant);
     });
-    storageService.subscribeToInventory(setInventory);
-    storageService.subscribeToClients(setClients);
-    storageService.subscribeToSettings(setSettings);
-    return () => {};
+    return () => unsubEvents();
   }, []);
 
   const getStatusLabel = (status: any) => {
@@ -83,7 +77,7 @@ const DispatchView: React.FC = () => {
                     </div>
                 );
             })}
-            {displayedOrders.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin despachos en esta categoría</div>}
+            {displayedOrders.length === 0 && <div className="col-span-full py-20 text-center opacity-20 uppercase font-black text-xs">Sin registros pendientes</div>}
         </div>
     </div>
   );
