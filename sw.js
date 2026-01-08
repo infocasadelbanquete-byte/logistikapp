@@ -1,4 +1,4 @@
-const CACHE_NAME = 'logistik-cache-v2.2.4';
+const CACHE_NAME = 'logistik-cache-v2.2.5';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('PWA: Precaching assets v2.2.4');
+      console.log('PWA: Precaching assets v2.2.5');
       return cache.addAll(STATIC_ASSETS);
     })
   );

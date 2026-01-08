@@ -34,24 +34,26 @@ const EventsView: React.FC = () => {
 
   const [newEvent, setNewEvent] = useState<Partial<EventOrder>>(defaultEventState);
 
-  const getStatusDisplay = (status: EventStatus) => {
-    switch (status) {
-      case EventStatus.RESERVED: return { label: 'Reservado', color: 'bg-amber-100 text-amber-700 border-amber-200' };
-      case EventStatus.DELIVERED: return { label: 'Entregado', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
-      case EventStatus.IN_PROGRESS: return { label: 'En Curso', color: 'bg-sky-100 text-sky-700 border-sky-200' };
-      case EventStatus.FINISHED: return { label: 'Finalizado', color: 'bg-rose-100 text-rose-700 border-rose-200' };
-      case EventStatus.WITH_ISSUES: return { label: 'Novedades', color: 'bg-red-100 text-red-700 border-red-200' };
-      case EventStatus.RETURNED: return { label: 'Retirado', color: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
-      default: return { label: 'Activo', color: 'bg-gray-100 text-gray-700 border-gray-200' };
-    }
+  const getStatusDisplay = (status: any) => {
+    const s = String(status).toUpperCase();
+    if (s === 'RESERVED' || s === 'RESERVADO' || s === 'CONFIRMADO') return { label: 'Reservado', color: 'bg-amber-100 text-amber-700 border-amber-200' };
+    if (s === 'DELIVERED' || s === 'ENTREGADO' || s === 'DESPACHADO') return { label: 'Entregado', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+    if (s === 'IN_PROGRESS' || s === 'EN CURSO') return { label: 'En Curso', color: 'bg-sky-100 text-sky-700 border-sky-200' };
+    if (s === 'FINISHED' || s === 'FINALIZADO') return { label: 'Finalizado', color: 'bg-rose-100 text-rose-700 border-rose-200' };
+    if (s === 'WITH_ISSUES' || s === 'NOVEDADES') return { label: 'Novedades', color: 'bg-red-100 text-red-700 border-red-200' };
+    if (s === 'RETURNED' || s === 'RETIRADO') return { label: 'Retirado', color: 'bg-zinc-100 text-zinc-700 border-zinc-200' };
+    return { label: status, color: 'bg-gray-100 text-gray-700 border-gray-200' };
   };
 
   useEffect(() => {
     const session = storageService.getCurrentSession();
     setCurrentUser(session);
     const unsubEvents = storageService.subscribeToEvents((all) => {
-        // FILTRADO ESTRICTO: Solo pedidos RESERVED o legacy key
-        setEvents(all.filter(e => e.status === EventStatus.RESERVED || (e.status as any) === 'RESERVED' || (e.status as any) === 'Reservado'));
+        // RESTITUCIÓN: Se incluyen estados equivalentes a Reservado para no perder registros previos
+        setEvents(all.filter(e => {
+            const s = String(e.status).toUpperCase();
+            return s === 'RESERVED' || s === 'RESERVADO' || s === 'CONFIRMADO';
+        }));
     });
     const unsubClients = storageService.subscribeToClients(setClients);
     const unsubInventory = storageService.subscribeToInventory(setInventory);
@@ -85,14 +87,6 @@ const EventsView: React.FC = () => {
     });
   };
 
-  const addItemToOrder = (item: InventoryItem) => {
-    const current = [...(newEvent.items || [])]; 
-    const idx = current.findIndex(i => i.itemId === item.id); 
-    if (idx >= 0) current[idx].quantity += 1; 
-    else current.push({ itemId: item.id, quantity: 1, priceAtBooking: item.price as any });
-    calculateTotal({ items: current });
-  };
-
   const handleSave = async () => {
     if (!newEvent.clientId) return uiService.alert("Requerido", 'Seleccione un cliente.');
     if (!newEvent.items?.length) return uiService.alert("Vacio", 'Agregue mobiliario.');
@@ -102,7 +96,7 @@ const EventsView: React.FC = () => {
         const orderData = { ...newEvent as EventOrder, orderNumber: orderNumberRes, id: editingId || '', status: EventStatus.RESERVED };
         await storageService.saveEvent(orderData);
         storageService.removeDraft(DRAFT_KEYS.EVENT);
-        uiService.alert("Guardado", `Pedido ORD-${orderNumberRes} sellado.`);
+        uiService.alert("Guardado", `Pedido ORD-${orderNumberRes} registrado.`);
         setViewMode('list');
     } catch (e: any) { uiService.alert("Error", e.message); } finally { setIsSaving(false); }
   };
@@ -114,7 +108,7 @@ const EventsView: React.FC = () => {
         {viewMode === 'list' && (
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-4">
                 <div className="flex-1 w-full space-y-2">
-                    <h2 className="text-lg font-black text-brand-900 uppercase tracking-tight">Registro de Pedidos Activos</h2>
+                    <h2 className="text-lg font-black text-brand-900 uppercase tracking-tight">Pedidos por Despachar</h2>
                     <div className="flex flex-col sm:flex-row gap-2">
                         <div className="flex-1 relative">
                             <input type="text" placeholder="Buscar..." className="w-full h-10 bg-white border border-zinc-100 rounded-xl px-10 text-[10px] font-bold shadow-soft outline-none focus:border-brand-200" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
@@ -146,13 +140,15 @@ const EventsView: React.FC = () => {
                     );
                 })}
                 {filteredEvents.length === 0 && (
-                    <div className="col-span-full py-20 text-center opacity-20 uppercase font-black tracking-[0.5em] text-xs">Sin pedidos por procesar</div>
+                    <div className="col-span-full py-20 text-center opacity-20 uppercase font-black tracking-[0.5em] text-xs">Sin pedidos pendientes</div>
                 )}
             </div>
         ) : (
-             <div className="bg-white/70 rounded-[2rem] p-10 h-full flex flex-col items-center justify-center animate-fade-in">
-                <h3 className="text-2xl font-black text-zinc-900 mb-6 uppercase">Formulario Pedido</h3>
-                <button onClick={() => setViewMode('list')} className="text-zinc-400 font-bold uppercase text-xs">Cerrar</button>
+             <div className="bg-white/70 rounded-[2rem] p-10 h-full flex flex-col items-center justify-center animate-fade-in text-center">
+                <div className="text-4xl mb-4">📝</div>
+                <h3 className="text-xl font-black text-zinc-900 mb-2 uppercase">Gestión de Pedido</h3>
+                <p className="text-zinc-400 text-xs mb-6 max-w-xs uppercase font-bold tracking-widest">Utilice el asistente para registrar mobiliario y fechas de ejecución.</p>
+                <button onClick={() => setViewMode('list')} className="px-10 py-3 bg-brand-900 text-white rounded-xl font-black uppercase text-[9px] tracking-[0.3em] shadow-premium">Cerrar Asistente</button>
              </div>
         )}
     </div>
